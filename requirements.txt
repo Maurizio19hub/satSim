@@ -1,0 +1,5 @@
+numpy>=1.26
+PySide6>=6.6
+pyqtgraph>=0.13.7
+PyOpenGL>=3.1
+pytest>=8        # solo per i test
