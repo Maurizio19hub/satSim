@@ -75,6 +75,8 @@ satSim/
 │   ├── view3d.py            # scena OpenGL (pyqtgraph.opengl)
 │   ├── dashboard.py         # grafici, telemetria numerica, pannello del modello
 │   └── main_window.py       # layout, comandi, loop temporale
+├── rl/                      # ─── REINFORCEMENT LEARNING (PPO, SB3) — vedi rl/README.md ───
+│   └── adcs_env.py          # ambiente Gymnasium + configurazione e training PPO
 └── tests/test_physics.py    # verifica: conservazione e soluzioni analitiche
 ```
 

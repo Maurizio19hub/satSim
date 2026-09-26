@@ -3,3 +3,7 @@ PySide6>=6.6
 pyqtgraph>=0.13.7
 PyOpenGL>=3.1
 pytest>=8        # solo per i test
+# --- Reinforcement Learning (rl/) ---
+gymnasium>=0.29
+stable-baselines3>=2.3
+tensorboard>=2.15
