@@ -359,3 +359,30 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 
   Il distacco viene quasi tutto dal termine d'errore, cioè dall'area sotto θ(t) durante la manovra grande. Sui seed 101, 103 e 107 l'agente arriva sotto 0.1° solo dopo 17–21 s.
 - Conclusione: la scala logaritmica ha eliminato l'offset. Resta da migliorare la manovra grande su alcuni seed.
+
+### 2026-09-28 — v5: ripresa da 1 M a 2 M passi
+- `ep_rew_mean`: sale da −72.7 a −41.7 (1.42 M), poi ricade a −66.4 (1.61 M) e risale a −47.3 (2.02 M). Andamento instabile. La deviazione standard della policy scende da 0.50 a 0.26.
+- Valutazione deterministica (seed 100–109): **peggiore** del modello a 1 M passi.
+
+  | | v5 1 M | v5 2 M | PD |
+  |---|---|---|---|
+  | Reward | −29.8 | −34.4 | −19.5 |
+  | Errore finale | 0.0042° | 0.018° | 0.0031° |
+  | Tempo per scendere sotto 1° | 12.0 s | 12.8 s | 12.2 s |
+
+- Reward per seed, PPO 2 M vs PD:
+
+  | Seed | 100 | 101 | 102 | 103 | 104 | 105 | 106 | 107 | 108 | 109 |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | PPO 2 M | −2.9 | −58.5 | −26.1 | −82.7 | −4.6 | −30.6 | 4.8 | −110.5 | −11.3 | −21.4 |
+  | PD | −3.0 | −25.2 | −16.5 | −45.8 | −7.3 | −24.6 | −5.5 | −37.2 | −14.9 | −14.8 |
+
+  PPO batte il PD su 4 seed (100, 104, 106, 108) e perde nettamente su 101, 103 e 107.
+- Seed difficili:
+  - 103 e 107 hanno l'angolo iniziale più grande (74°, 69°) e ω0 che allontana dal target (+2.4 °/s lungo l'asse d'errore);
+  - 101 ha θ0 = 64°.
+  - Sono difficili anche per il PD, ma lì il distacco di PPO è massimo: la coda della distribuzione iniziale (θ0 vicino a 80°) è imparata peggio.
+- Problemi emersi:
+  1. Senza checkpoint il modello migliore del training (intorno a 1.42 M) è andato perso.
+  2. `ep_rew_mean` (policy stocastica) e valutazione deterministica non vanno nella stessa direzione.
+  3. Con learning rate costante, la fase di rifinitura è instabile.
