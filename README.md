@@ -76,8 +76,11 @@ satSim/
 │   ├── dashboard.py         # grafici, telemetria numerica, pannello del modello
 │   └── main_window.py       # layout, comandi, loop temporale
 ├── rl/                      # ─── REINFORCEMENT LEARNING (PPO, SB3) — vedi rl/README.md ───
-│   └── adcs_env.py          # ambiente Gymnasium + configurazione e training PPO
-└── tests/test_physics.py    # verifica: conservazione e soluzioni analitiche
+│   ├── adcs_env.py          # ambiente Gymnasium (solo fisica, niente GUI)
+│   └── train.py             # addestramento PPO headless: python -m rl.train
+└── tests/
+    ├── test_physics.py      # verifica: conservazione e soluzioni analitiche
+    └── test_rl_env.py       # ambiente RL e training senza GUI
 ```
 
 Le dipendenze vanno in un solo verso: `gui → satsim`, mai il contrario.

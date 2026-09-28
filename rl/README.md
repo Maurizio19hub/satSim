@@ -2,7 +2,7 @@
 
 Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nel [README principale](../README.md).
 
-**Stato:** v2 dell'ambiente. Osservazione = assetto + velocità angolare. Reward = − errore d'assetto (lineare) − accelerazioni oltre soglia. Non ancora addestrato a convergenza.
+**Stato:** v3 dell'ambiente. Azione = variazione di coppia delle ruote. Osservazione = assetto + velocità angolare + coppia corrente. Reward = − errore d'assetto (lineare) − accelerazioni oltre soglia. Non ancora addestrato a convergenza.
 
 ---
 
@@ -31,7 +31,8 @@ Il PD resta il **baseline** di confronto: l'agente deve eguagliarlo o superarlo 
 ```
 rl/
 ├── __init__.py
-├── adcs_env.py     # ambiente Gymnasium SatAttitudeEnv + configurazione e training PPO (SB3)
+├── adcs_env.py     # ambiente Gymnasium SatAttitudeEnv (solo fisica, niente SB3 né GUI)
+├── train.py        # addestramento PPO con Stable-Baselines3 (headless)
 └── README.md       # questo documento
 ```
 
@@ -39,14 +40,16 @@ Dipendenze aggiuntive (in `requirements.txt`): `gymnasium`, `stable-baselines3`,
 
 Le dipendenze vanno in un solo verso: `rl → satsim`. L'engine non importa nulla da `rl/`.
 
+**Training senza GUI.** `rl/` non importa mai `gui/`, PySide6, pyqtgraph o OpenGL: la simulazione grafica parte solo con `python main.py`. Durante l'addestramento gira soltanto l'engine fisico. Il test `tests/test_rl_env.py::test_training_is_headless` verifica che importare `rl.train` non carichi nessun modulo grafico.
+
 ## 3. Formulazione come MDP
 
 | Elemento | Scelta | Stato |
 |---|---|---|
 | **Passo di controllo** | Un passo dell'engine, Δt = `params.dt` (0.05 s). Azione mantenuta costante sul passo (zero-order hold). | deciso |
-| **Azione** | `Box([-1, 1]^N)`: coppie motore delle N ruote normalizzate. Denormalizzazione `tau = action · T_max`. I limiti fisici (coppia e saturazione in velocità) restano applicati dall'engine. | deciso |
-| **Osservazione** | `Box(7)`: `[q_err (4) , ω / OMEGA_SCALE (3)]`, cioè "posizione" (assetto rispetto al target) e velocità angolare. `OMEGA_SCALE = 0.1 rad/s`. | v1 |
-| **Stato iniziale** | Assetto casuale a 40–80° dal target (asse casuale), `ω` uniforme in ±0.05 rad/s, ruote ferme. Campionato con `self.np_random`. | v1 |
+| **Azione** | `Box([-1, 1]^N)`: **variazione** della coppia motore di ogni ruota. `τ ← clip(τ + action · Δτ_max, ±T_max)` con `Δτ_max = DTAU_MAX_FRAC · T_max`. I limiti fisici (coppia e saturazione in velocità) restano applicati dall'engine. | v3 |
+| **Osservazione** | `Box(7 + N)`: `[q_err (4) , ω / OMEGA_SCALE (3) , τ / T_max (N)]`, cioè "posizione" (assetto rispetto al target), velocità angolare e coppia motore corrente. `OMEGA_SCALE = 0.1 rad/s`. | v3 |
+| **Stato iniziale** | Assetto casuale a 40–80° dal target (asse casuale), `ω` uniforme in ±0.05 rad/s, ruote ferme, coppia nulla. Campionato con `self.np_random`. | v3 |
 | **Terminazione** | Nessuna: `terminated` è sempre `False`. | v1 |
 | **Troncamento** | `max_episode_steps` (default 2000 passi = 100 s). | deciso |
 
@@ -54,18 +57,20 @@ Le dipendenze vanno in un solo verso: `rl → satsim`. L'engine non importa null
 
 - **Posizione = `q_err`**, il quaternione d'errore `q_target* ⊗ q` con `q_e0 ≥ 0` (rotazione più breve). È la rappresentazione dell'assetto relativa al target: vale `[1, 0, 0, 0]` quando il satellite è allineato. Le componenti sono già in [−1, 1].
 - **Velocità = `ω`** in body, divisa per `OMEGA_SCALE` per portarla a valori dell'ordine di 1 (la rete neurale di PPO lavora meglio con ingressi normalizzati).
-### Azione: coppia assoluta, non variazione di coppia
+- **Coppia corrente = `τ / T_max`**, in [−1, 1]. Serve perché l'azione è una variazione: senza conoscere la coppia attuale l'agente non saprebbe che coppia sta applicando (stato non Markoviano).
 
-L'azione è la **coppia applicata direttamente** a ogni ruota nel passo, non una variazione rispetto al passo precedente. Tra due passi consecutivi (0.05 s) l'agente può quindi passare da +T_max a −T_max.
+### Azione: variazione di coppia (rate limit)
 
-- La penalità sull'accelerazione limita l'**ampiezza** della coppia (α ∝ coppia), ma non la sua **variazione** nel tempo (il *jerk*, dα/dt).
-- Rischio: una policy a "commutazione" (*chattering*) tra valori opposti. Sul satellite reale produce vibrazioni (jitter), picchi di corrente e usura dei motori.
-- Alternative da valutare:
-  1. azione = Δτ con τ limitata in variazione. In questo caso τ va aggiunta all'osservazione, altrimenti l'agente non conosce la coppia attuale;
-  2. coppia assoluta + penalità su |a_t − a_{t−1}|;
-  3. coppia assoluta + filtro passa-basso sull'azione.
+L'azione è la **variazione** della coppia motore di ogni ruota in un passo, non la coppia stessa. La coppia è quindi uno stato interno dell'ambiente (`self._tau`), azzerato a ogni `reset`:
 
-Per ora si mantiene la coppia assoluta.
+$$
+\tau_t = \mathrm{clip}\left(\tau_{t-1} + a_t\,\Delta\tau_{max},\ -T_{max},\ T_{max}\right), \qquad \Delta\tau_{max} = \texttt{DTAU\_MAX\_FRAC}\cdot T_{max}
+$$
+
+- Con `DTAU_MAX_FRAC = 0.2` e Δt = 0.05 s la coppia va da 0 a T_max in 5 passi (0.25 s) e da −T_max a +T_max in 10 passi (0.5 s).
+- Motivo: con la coppia assoluta l'agente poteva commutare da +T_max a −T_max in un solo passo (*chattering*), con vibrazioni, picchi di corrente e usura dei motori. Ora la variazione è limitata per costruzione.
+- Il comando `τ` è quello richiesto all'engine. L'engine può applicarne meno se la ruota è vicina alla saturazione in velocità.
+- `action = 0` significa "mantieni la coppia attuale", non "coppia nulla".
 
 ### Ruote non osservate
 
@@ -77,12 +82,12 @@ Per ora si mantiene la coppia assoluta.
 
 | Metodo | Compito |
 |---|---|
-| `__init__(params, max_episode_steps, render_mode, reward_config)` | Crea `SatelliteEngine`, definisce `action_space` e `observation_space`, legge i pesi della reward (`REWARD_CONFIG`, sovrascrivibili). |
-| `reset(seed, options)` | Campiona le condizioni iniziali, resetta l'engine, salva `ω` iniziale come "passo precedente". Ritorna `(obs, info)`. |
-| `step(action)` | Denormalizza l'azione, chiama `engine.step(tau)`, calcola l'accelerazione `α = (ω − ω_prev)/Δt`, la reward, aggiorna i valori precedenti. Ritorna `(obs, reward, terminated, truncated, info)`. |
+| `__init__(params, max_episode_steps, render_mode, reward_config, dtau_max_frac)` | Crea `SatelliteEngine`, definisce `action_space` e `observation_space`, legge i pesi della reward (`REWARD_CONFIG`, sovrascrivibili) e il limite di variazione della coppia. |
+| `reset(seed, options)` | Campiona le condizioni iniziali, resetta l'engine, azzera la coppia, salva `ω` iniziale come "passo precedente". Ritorna `(obs, info)`. |
+| `step(action)` | Aggiorna la coppia `τ ← clip(τ + action · Δτ_max)`, chiama `engine.step(τ)`, calcola l'accelerazione `α = (ω − ω_prev)/Δt`, la reward, aggiorna i valori precedenti. Ritorna `(obs, reward, terminated, truncated, info)`. |
 | `_compute_reward(tel, action)` | Reward del passo (§5). |
 | `_get_obs(tel)` | Vettore d'osservazione (§3). |
-| `_info(tel)` | Diagnostica per ogni passo: `att_err_deg`, `alpha_deg`, `power`, `wheel_saturation`. |
+| `_info(tel)` | Diagnostica per ogni passo: `att_err_deg`, `alpha_deg`, `tau`, `power`, `wheel_saturation`. |
 
 Nota: il metodo si chiama `_compute_reward` e non `compute_reward` perché Stable-Baselines3 riserva quel nome agli ambienti *goal-conditioned* (`GoalEnv`) e `check_env` fallirebbe.
 
@@ -97,7 +102,7 @@ $$
 | $\theta_t$ | errore d'assetto `tel.att_err_deg` [°] | — |
 | $\alpha_t$ | accelerazione angolare $(\omega_t-\omega_{t-1})/\Delta t$ [°/s²] | — |
 | $k_{err}$ | penalità per grado di errore, per passo | `k_err = 0.01` |
-| $\alpha_{max}$ | soglia di accelerazione per asse | `alpha_max_deg = 2.0` °/s² (da confermare) |
+| $\alpha_{max}$ | soglia di accelerazione per asse | `alpha_max_deg = 2.0` °/s² (confermato) |
 | $k_{acc}$ | penalità per °/s² oltre soglia | `k_accel = 0.01` |
 
 **Termine d'errore.** Penalità lineare e sempre attiva: a 60° vale −0.6 per passo, a 1° vale −0.01. La reward è sempre ≤ 0 e il massimo (0) si ha solo sul target. Sull'episodio la penalità è proporzionale all'area sotto la curva θ(t). Quindi premia sia l'**arrivare presto** sia il **restare** sul target: è il motivo per cui ha sostituito il termine differenziale della v1 (§ limiti della v1).
@@ -135,13 +140,15 @@ Il PD del simulatore non è stato progettato con un limite di accelerazione: il 
 
 Fonti: [MinXSS-1 On-Orbit Pointing and Power Performance (arXiv:1706.06967)](https://arxiv.org/abs/1706.06967); [Nanobob, ST200 (arXiv:1711.01886)](https://arxiv.org/pdf/1711.01886).
 
-**Verifica v2 (episodio con seed 1, 2000 passi).**
+**Verifica v3 (episodio con seed 1, 2000 passi, azione = variazione di coppia).**
 
-| Policy | Return | Errore finale |
-|---|---|---|
-| Azioni nulle (satellite libero) | −2539 | 121° |
-| Azioni casuali | −2915 | 103° |
-| PD al posto dell'agente | −75 | 0.003° |
+| Policy | Return | Errore finale | \|α\| max |
+|---|---|---|---|
+| Azioni nulle (coppia sempre 0, satellite libero) | −2539 | 121° | 0.03 °/s² |
+| Azioni casuali | −2496 | 95° | 46 °/s² |
+| PD, passato attraverso lo stesso rate limit | −76 | 0.003° | 8.1 °/s² |
+
+Nella v2 (coppia assoluta) il PD otteneva −75: il rate limit non peggiora in modo apprezzabile il controllo.
 
 ### Storia: v1 (reward differenziale)
 
@@ -154,14 +161,13 @@ Verifica v1 (seed 1): azioni nulle −43.4, PD +76.5.
 ### Limiti noti
 
 1. **Scala dei due termini.** Con una policy casuale la penalità d'accelerazione è dello stesso ordine del termine d'errore (~0.1–0.3 per passo). Se l'agente resta bloccato nel minimo locale "azioni piccole", si riduce `k_accel`.
-2. **Coppia assoluta senza limite sulla variazione** (chattering), vedi §3.
-3. **Osservazione parziale** (ruote non osservate), vedi §3.
+2. **Osservazione parziale** (ruote non osservate), vedi §3.
 
 ## 6. Algoritmo: PPO
 
 Si usa **PPO** (*Proximal Policy Optimization*) di Stable-Baselines3, con policy `MlpPolicy`. PPO è on-policy, supporta azioni continue (`Box`) e funziona con ambienti vettorizzati.
 
-Iperparametri iniziali (`PPO_CONFIG` in `adcs_env.py`, default di SB3, da tarare):
+Iperparametri iniziali (`PPO_CONFIG` in `train.py`, default di SB3, da tarare):
 
 | Parametro | Valore |
 |---|---|
@@ -175,20 +181,23 @@ Iperparametri iniziali (`PPO_CONFIG` in `adcs_env.py`, default di SB3, da tarare
 | `ent_coef` | 0.0 |
 | `vf_coef` | 0.5 |
 | `max_grad_norm` | 0.5 |
+| `device` | `cpu` (con una rete piccola la CPU è più veloce della GPU) |
 
 ## 7. Addestramento
 
 ```bash
 pip install -r requirements.txt
-python -m rl.adcs_env                          # avvia train() con TRAIN_CONFIG
+python -m rl.train                             # 1 M passi, 4 ambienti in sequenza
+python -m rl.train --subproc                   # 4 ambienti in 4 processi (più veloce)
+python -m rl.train --timesteps 24576           # prova breve: misura la velocità del proprio PC
 tensorboard --logdir runs/ppo_adcs             # curve di apprendimento
 ```
 
 `train()` esegue, in ordine:
 1. `check_env` di SB3 per verificare la conformità all'API Gymnasium;
-2. `make_vec_env` con `n_envs = 4` ambienti paralleli;
+2. `make_vec_env` con `n_envs = 4` ambienti (`DummyVecEnv`, oppure `SubprocVecEnv` con `--subproc`);
 3. `PPO.learn` per `total_timesteps = 1 000 000`;
-4. salvataggio del modello in `models/ppo_adcs.zip`.
+4. stampa della durata e salvataggio del modello in `models/ppo_adcs.zip`.
 
 Le cartelle `runs/` e `models/` sono escluse da git.
 
@@ -197,16 +206,27 @@ Le cartelle `runs/` e `models/` sono escluse da git.
 - **Cosa sono.** 4 copie indipendenti del simulatore, cioè 4 satelliti con condizioni iniziali diverse. **C'è un solo agente**, cioè una sola rete neurale: a ogni passo calcola in un colpo le 4 azioni, una per satellite, e ogni copia avanza di Δt.
 - **Rollout.** Ogni aggiornamento di PPO usa `n_steps × n_envs = 2048 × 4 = 8192` transizioni. Quando un episodio finisce in una copia, quella si resetta da sola e le altre continuano.
 - **Conteggio dei passi.** `total_timesteps` conta la somma dei passi di tutte le copie: 1 M passi totali = 250 k per copia.
-- **Esecuzione.** Con `DummyVecEnv` (default di `make_vec_env`) le 4 copie girano **in sequenza nello stesso processo**, quindi non c'è vero parallelismo di CPU. Il vantaggio è statistico: i dati di ogni aggiornamento vengono da 4 episodi diversi e sono meno correlati. Per usare più core si passa `vec_env_cls=SubprocVecEnv`.
+- **Esecuzione.** Con `DummyVecEnv` (default di `make_vec_env`) le 4 copie girano **in sequenza nello stesso processo**, quindi non c'è vero parallelismo di CPU. Il vantaggio è statistico: i dati di ogni aggiornamento vengono da 4 episodi diversi e sono meno correlati. Per usare più core si usa `--subproc` (`SubprocVecEnv`).
 
 Throughput misurato nel cloud: ~460 passi/s con 4 ambienti, cioè ~1 M passi in ~35 min.
 
 **Prova breve (40 000 passi).** La pipeline funziona end-to-end. `ep_rew_mean` passa da −378 a −366: sono troppo pochi passi (~20 episodi per ambiente) per imparare la manovra. Serve un addestramento lungo.
 
+### Tempi di addestramento
+
+Misure nel container cloud (Intel Xeon 2.8 GHz, 4 vCPU, PyTorch su CPU):
+
+| Configurazione | Passi/s | 1 M passi |
+|---|---|---|
+| Solo fisica, 1 ambiente, senza PPO | 809 | 21 min |
+| PPO, 4 ambienti in sequenza (`DummyVecEnv`) | 411 | ~41 min |
+| PPO, 4 ambienti in 4 processi (`--subproc`) | 591 | ~28 min |
+
+Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle derivate (4 stadi RK4 + 1 per la telemetria). L'altra metà è PPO: inferenza della rete e 10 epoche di aggiornamento ogni 8192 passi. Per stimare il tempo su un altro PC basta lanciare `python -m rl.train --timesteps 24576` e moltiplicare la durata stampata per ~40.
+
 ## 8. Decisioni aperte
 
-- Valore di `alpha_max_deg`: 1, 2 o picco del PD (§5).
-- Azione: coppia assoluta o variazione di coppia (§3).
+- Valore di `DTAU_MAX_FRAC` (§3).
 - Taratura di `k_err` e `k_accel`.
 - Aggiunta delle velocità delle ruote all'osservazione.
 - Condizioni di terminazione anticipata.
@@ -234,3 +254,10 @@ Throughput misurato nel cloud: ~460 passi/s con 4 ambienti, cioè ~1 M passi in 
 - Termine differenziale sostituito da penalità lineare sull'errore: `−k_err · θ` con `k_err = 0.01`.
 - Termine sulle accelerazioni oltre soglia invariato.
 - Documentati: azione come coppia assoluta (e rischio di chattering), riferimenti reali per la soglia d'accelerazione, funzionamento degli ambienti paralleli.
+
+### 2026-09-28 — v3: variazione di coppia e training separato
+- Azione = variazione di coppia per ruota, limitata a `0.2 · T_max` per passo. La coppia corrente `τ / T_max` è aggiunta all'osservazione (7 + N valori).
+- Soglia d'accelerazione confermata a 2 °/s².
+- Training spostato in `rl/train.py` (headless, CLI con `--timesteps`, `--n-envs`, `--subproc`, `--seed`). `rl/adcs_env.py` contiene solo l'ambiente.
+- Nuovi test `tests/test_rl_env.py`: training senza moduli GUI, `check_env`, rate limit della coppia, reward nulla sul target.
+- Misurati i tempi di addestramento (§7).

@@ -1,66 +1,33 @@
 """
-Ambiente Gymnasium per l'addestramento di un agente PPO (Stable-Baselines3)
-sul controllo d'assetto del CubeSat 3U con ruote di reazione.
+Ambiente Gymnasium per il controllo d'assetto del CubeSat 3U con ruote di
+reazione, da addestrare con PPO (Stable-Baselines3, vedi rl/train.py).
 
 L'ambiente avvolge SatelliteEngine (pacchetto `satsim/`) e sostituisce il
-controllore PD: ad ogni passo l'agente sceglie direttamente le coppie motore
-delle N ruote. La logica RL (spazi, osservazione, reward, terminazione) è
-documentata in rl/README.md.
+controllore PD. Non importa nulla della GUI né di Stable-Baselines3: è solo
+fisica + interfaccia Gymnasium. La logica RL (spazi, osservazione, reward)
+è documentata in rl/README.md.
 
-Stato attuale: v2. Osservazione = assetto e velocità angolare;
-reward = penalità lineare sull'errore d'assetto e sulle accelerazioni oltre soglia.
-
-Uso previsto:
-
-    python -m rl.adcs_env            # addestramento PPO con i parametri di default
+Stato attuale: v3.
+- Azione = variazione della coppia motore di ogni ruota (coppia rate-limited).
+- Osservazione = assetto, velocità angolare e coppia motore corrente.
+- Reward = penalità lineare sull'errore d'assetto e sulle accelerazioni
+  oltre soglia.
 """
 from __future__ import annotations
-
-from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from stable_baselines3 import PPO
-from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.env_util import make_vec_env
 
 from satsim import SatelliteEngine, SimParams, Telemetry
 from satsim.quaternion import quat_from_axis_angle
 
-# =============================================================================
-# Configurazione
-# =============================================================================
-# Iperparametri di PPO (valori di default di SB3, da tarare).
-PPO_CONFIG = dict(
-    policy="MlpPolicy",
-    learning_rate=3e-4,
-    n_steps=2048,           # passi raccolti per ambiente prima di ogni aggiornamento
-    batch_size=64,
-    n_epochs=10,
-    gamma=0.99,
-    gae_lambda=0.95,
-    clip_range=0.2,
-    ent_coef=0.0,
-    vf_coef=0.5,
-    max_grad_norm=0.5,
-    verbose=1,
-)
-
-TRAIN_CONFIG = dict(
-    total_timesteps=1_000_000,
-    n_envs=4,               # ambienti paralleli (DummyVecEnv)
-    seed=0,
-    log_dir=Path("runs/ppo_adcs"),
-    model_path=Path("models/ppo_adcs"),
-)
-
-
-# =============================================================================
-# Ambiente
-# =============================================================================
 # Scala di normalizzazione di ω nell'osservazione: 0.1 rad/s ≈ 5.7 °/s → ~1.
 OMEGA_SCALE = 0.1           # [rad/s]
+
+# Massima variazione di coppia per passo, come frazione di T_max.
+# Con 0.2 e Δt = 0.05 s la coppia va da 0 a T_max in 5 passi (0.25 s).
+DTAU_MAX_FRAC = 0.2
 
 # Pesi e soglie della reward (vedi rl/README.md §5).
 REWARD_CONFIG = dict(
@@ -71,35 +38,41 @@ REWARD_CONFIG = dict(
 
 
 class SatAttitudeEnv(gym.Env):
-    """Ambiente di controllo d'assetto: azione = coppie motore delle ruote.
+    """Ambiente di controllo d'assetto: azione = variazione delle coppie motore.
 
-    Osservazione (7): [ q_err (4) | ω / OMEGA_SCALE (3) ]
-    Azione (N):       coppie motore normalizzate in [-1, 1], tau = action · T_max
+    Osservazione (7 + N): [ q_err (4) | ω / OMEGA_SCALE (3) | τ / T_max (N) ]
+    Azione (N):           Δτ normalizzata in [-1, 1],
+                          τ ← clip(τ + action · DTAU_MAX_FRAC · T_max, ±T_max)
     """
 
     metadata = {"render_modes": []}
 
     def __init__(self, params: SimParams | None = None, max_episode_steps: int = 2000,
-                 render_mode: str | None = None, reward_config: dict | None = None):
+                 render_mode: str | None = None, reward_config: dict | None = None,
+                 dtau_max_frac: float = DTAU_MAX_FRAC):
         """Inizializzazione: engine fisico, spazi di azione e osservazione, parametri."""
         super().__init__()
         self.engine = SatelliteEngine(params)
         self.dt = self.engine.dt
         self.n_wheels = self.engine.rw.n
         self.tau_max = self.engine.rw.tau_max
+        self.dtau_max = dtau_max_frac * self.tau_max
         self.max_episode_steps = max_episode_steps
         self.render_mode = render_mode
         self.reward_config = {**REWARD_CONFIG, **(reward_config or {})}
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_wheels,), dtype=np.float32)
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(7,), dtype=np.float32)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(7 + self.n_wheels,),
+                                            dtype=np.float32)
 
         self._steps = 0
-        self._prev_omega = np.zeros(3)  # ω al passo precedente (per l'accelerazione)
-        self._alpha = np.zeros(3)       # accelerazione angolare dell'ultimo passo [rad/s²]
+        self._tau = np.zeros(self.n_wheels)     # coppia motore corrente [N·m]
+        self._prev_omega = np.zeros(3)          # ω al passo precedente (per l'accelerazione)
+        self._alpha = np.zeros(3)               # accelerazione angolare dell'ultimo passo [rad/s²]
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
-        """Nuovo episodio: assetto casuale a 40–80° dal target, ω casuale, ruote ferme.
+        """Nuovo episodio: assetto casuale a 40–80° dal target, ω casuale,
+        ruote ferme e coppia nulla.
 
         Ritorna: (observation, info)
         """
@@ -111,6 +84,7 @@ class SatAttitudeEnv(gym.Env):
         tel = self.engine.reset(q0=q0, omega0=omega0)
 
         self._steps = 0
+        self._tau = np.zeros(self.n_wheels)
         self._prev_omega = tel.omega
         self._alpha = np.zeros(3)
         return self._get_obs(tel), self._info(tel)
@@ -120,14 +94,14 @@ class SatAttitudeEnv(gym.Env):
 
         Ritorna: (observation, reward, terminated, truncated, info)
         """
-        tau = np.clip(action, -1.0, 1.0) * self.tau_max
-        tel = self.engine.step(tau)
+        dtau = np.clip(action, -1.0, 1.0) * self.dtau_max
+        self._tau = np.clip(self._tau + dtau, -self.tau_max, self.tau_max)
+        tel = self.engine.step(self._tau)
         self._steps += 1
 
         # Accelerazione angolare dalla variazione di velocità tra due passi
         self._alpha = (tel.omega - self._prev_omega) / self.dt
         reward = self._compute_reward(tel, action)
-
         self._prev_omega = tel.omega
 
         terminated = False
@@ -150,32 +124,11 @@ class SatAttitudeEnv(gym.Env):
         return float(-c["k_err"] * tel.att_err_deg - c["k_accel"] * accel_excess)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
-        """Osservazione: quaternione d'errore e velocità angolare normalizzata."""
-        return np.concatenate((tel.q_err, tel.omega / OMEGA_SCALE)).astype(np.float32)
+        """Osservazione: quaternione d'errore, ω normalizzata, coppia corrente normalizzata."""
+        return np.concatenate((tel.q_err, tel.omega / OMEGA_SCALE,
+                               self._tau / self.tau_max)).astype(np.float32)
 
     def _info(self, tel: Telemetry) -> dict:
         return dict(att_err_deg=tel.att_err_deg, alpha_deg=np.degrees(self._alpha),
-                    power=tel.power_total, wheel_saturation=tel.wheel_saturation.max())
-
-
-# =============================================================================
-# Training con Stable-Baselines3
-# =============================================================================
-def train(ppo_config: dict = PPO_CONFIG, train_config: dict = TRAIN_CONFIG) -> PPO:
-    """Addestra PPO sull'ambiente e salva il modello."""
-    check_env(SatAttitudeEnv(), warn=True)      # verifica la conformità all'API Gymnasium
-
-    vec_env = make_vec_env(SatAttitudeEnv, n_envs=train_config["n_envs"],
-                           seed=train_config["seed"])
-    model = PPO(env=vec_env, tensorboard_log=str(train_config["log_dir"]),
-                seed=train_config["seed"], **ppo_config)
-    model.learn(total_timesteps=train_config["total_timesteps"])
-
-    train_config["model_path"].parent.mkdir(parents=True, exist_ok=True)
-    model.save(train_config["model_path"])
-    vec_env.close()
-    return model
-
-
-if __name__ == "__main__":
-    train()
+                    tau=self._tau.copy(), power=tel.power_total,
+                    wheel_saturation=tel.wheel_saturation.max())
