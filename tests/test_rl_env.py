@@ -8,7 +8,8 @@ import pytest
 gym = pytest.importorskip("gymnasium")
 pytest.importorskip("stable_baselines3")
 
-from rl.adcs_env import SatAttitudeEnv  # noqa: E402
+from rl.adcs_env import SatAttitudeEnv, log_attitude_error  # noqa: E402
+from satsim.quaternion import quat_from_axis_angle  # noqa: E402
 
 GUI_MODULES = ("PySide6", "pyqtgraph", "OpenGL", "gui")
 
@@ -30,21 +31,21 @@ def test_action_is_rate_limited_torque_change():
     env = SatAttitudeEnv()
     obs, _ = env.reset(seed=0)
     n = env.n_wheels
-    assert obs.shape == (7 + n,)
-    np.testing.assert_array_equal(obs[7:], 0.0)          # coppia iniziale nulla
+    assert obs.shape == (6 + n,)
+    np.testing.assert_array_equal(obs[6:], 0.0)          # coppia iniziale nulla
 
     # Azione massima per un passo: la coppia sale di DTAU_MAX_FRAC · T_max
     obs, *_ = env.step(np.ones(n, dtype=np.float32))
-    np.testing.assert_allclose(obs[7:], env.dtau_max / env.tau_max, rtol=1e-6)
+    np.testing.assert_allclose(obs[6:], env.dtau_max / env.tau_max, rtol=1e-6)
 
     # Dopo molti passi resta limitata a ±T_max
     for _ in range(20):
         obs, *_ = env.step(np.ones(n, dtype=np.float32))
-    np.testing.assert_allclose(obs[7:], 1.0, rtol=1e-6)
+    np.testing.assert_allclose(obs[6:], 1.0, rtol=1e-6)
 
     # Azione nulla: la coppia resta invariata
     obs2, *_ = env.step(np.zeros(n, dtype=np.float32))
-    np.testing.assert_allclose(obs2[7:], obs[7:])
+    np.testing.assert_allclose(obs2[6:], obs[6:])
 
 
 def test_reward_is_bonus_on_target_at_rest():
@@ -55,3 +56,16 @@ def test_reward_is_bonus_on_target_at_rest():
     env._tau[:] = 0.0
     _, r, *_ = env.step(np.zeros(env.n_wheels, dtype=np.float32))
     assert abs(r - env.reward_config["bonus"]) < 1e-3
+
+
+def test_log_attitude_error():
+    axis = np.array([0.0, 0.6, 0.8])
+    np.testing.assert_array_equal(log_attitude_error(np.array([1.0, 0, 0, 0])), 0.0)
+    prev = 0.0
+    for deg in (0.01, 0.1, 0.45, 10, 60, 179.9):
+        e = log_attitude_error(quat_from_axis_angle(axis, np.radians(deg)))
+        g = np.linalg.norm(e)
+        np.testing.assert_allclose(e / g, axis, atol=1e-9)    # direzione = asse
+        assert prev < g <= 1.0                                 # monotona, limitata
+        prev = g
+    assert np.linalg.norm(log_attitude_error(quat_from_axis_angle(axis, np.radians(0.45)))) > 0.2

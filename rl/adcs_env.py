@@ -7,9 +7,10 @@ controllore PD. Non importa nulla della GUI né di Stable-Baselines3: è solo
 fisica + interfaccia Gymnasium. La logica RL (spazi, osservazione, reward)
 è documentata in rl/README.md.
 
-Stato attuale: v4.
+Stato attuale: v5.
 - Azione = variazione della coppia motore di ogni ruota (coppia rate-limited).
-- Osservazione = assetto, velocità angolare e coppia motore corrente.
+- Osservazione = errore d'assetto in scala logaritmica, velocità angolare e
+  coppia motore corrente.
 - Reward = penalità lineare sull'errore d'assetto e sulle accelerazioni
   oltre soglia + bonus per ogni passo vicino al target.
 """
@@ -25,6 +26,12 @@ from satsim.quaternion import quat_from_axis_angle
 # Scala di normalizzazione di ω nell'osservazione: 0.1 rad/s ≈ 5.7 °/s → ~1.
 OMEGA_SCALE = 0.1           # [rad/s]
 
+# Scala logaritmica dell'errore d'assetto nell'osservazione:
+#   e = asse · log(1 + θ/θ0) / log(1 + π/θ0)
+# θ0 fissa dove la scala passa da lineare a logaritmica. Con θ0 = 0.1°:
+# 0.01° → 0.013, 0.1° → 0.092, 0.45° → 0.23, 10° → 0.62, 60° → 0.85, 180° → 1.
+LOG_THETA0 = np.radians(0.1)    # [rad]
+
 # Massima variazione di coppia per passo, come frazione di T_max.
 # Con 0.2 e Δt = 0.05 s la coppia va da 0 a T_max in 5 passi (0.25 s).
 DTAU_MAX_FRAC = 0.2
@@ -39,10 +46,26 @@ REWARD_CONFIG = dict(
 )
 
 
+def log_attitude_error(q_err: np.ndarray, theta0: float = LOG_THETA0) -> np.ndarray:
+    """Errore d'assetto come vettore asse · g(θ), con g logaritmica in [0, 1].
+
+    q_err ha q0 ≥ 0 (rotazione più breve), quindi θ = 2·atan2(|q_vec|, q0) ∈ [0, π].
+    Vicino a zero g(θ) ≈ θ/(θ0·log(1 + π/θ0)): il segnale resta leggibile anche
+    per errori di centesimi di grado, senza saturare alle grandi rotazioni.
+    """
+    q_vec = q_err[1:]
+    s = np.linalg.norm(q_vec)
+    if s < 1e-12:
+        return np.zeros(3)
+    theta = 2.0 * np.arctan2(s, q_err[0])
+    g = np.log1p(theta / theta0) / np.log1p(np.pi / theta0)
+    return q_vec / s * g
+
+
 class SatAttitudeEnv(gym.Env):
     """Ambiente di controllo d'assetto: azione = variazione delle coppie motore.
 
-    Osservazione (7 + N): [ q_err (4) | ω / OMEGA_SCALE (3) | τ / T_max (N) ]
+    Osservazione (6 + N): [ e_log (3) | ω / OMEGA_SCALE (3) | τ / T_max (N) ]
     Azione (N):           Δτ normalizzata in [-1, 1],
                           τ ← clip(τ + action · DTAU_MAX_FRAC · T_max, ±T_max)
     """
@@ -64,7 +87,7 @@ class SatAttitudeEnv(gym.Env):
         self.reward_config = {**REWARD_CONFIG, **(reward_config or {})}
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_wheels,), dtype=np.float32)
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(7 + self.n_wheels,),
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(6 + self.n_wheels,),
                                             dtype=np.float32)
 
         self._steps = 0
@@ -130,8 +153,8 @@ class SatAttitudeEnv(gym.Env):
                      + c["bonus"] * on_target)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
-        """Osservazione: quaternione d'errore, ω normalizzata, coppia corrente normalizzata."""
-        return np.concatenate((tel.q_err, tel.omega / OMEGA_SCALE,
+        """Osservazione: errore d'assetto in scala log, ω normalizzata, coppia corrente normalizzata."""
+        return np.concatenate((log_attitude_error(tel.q_err), tel.omega / OMEGA_SCALE,
                                self._tau / self.tau_max)).astype(np.float32)
 
     def _info(self, tel: Telemetry) -> dict:
