@@ -301,3 +301,21 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   | Energia | 69.7 J | 68.9 J | 61.3 J |
 
 - L'errore finale resta un offset costante, identico in tutti gli episodi: la policy converge a un punto fisso a ~0.4° dal target.
+
+### 2026-09-28 — v4: bonus vicino al target (1 M passi da zero)
+- Reward: `+0.02` per ogni passo con θ < 0.1°. Nuovo `rl/evaluate.py` per il confronto sui seed 100–109.
+- Baseline v4:
+
+  | | Reward | Errore finale |
+  |---|---|---|
+  | PD | −19.5 | 0.0031° |
+  | Satellite libero | −2300 | 131° |
+  | Azioni casuali | −2759 | 130° |
+
+- Training di 18 min. La curva `ep_rew_mean` è praticamente identica a quella senza bonus: da −2720 a −64.5.
+- Valutazione PPO: reward −56.9, errore finale 0.448° (identico su tutti i seed), 16.2 s per scendere sotto 1°, \|α\| max 10.8 °/s², 65.0 J. Criteri di successo non raggiunti.
+- Diagnosi: il bonus non viene quasi mai raccolto, quindi non guida l'apprendimento.
+  - Dopo 30 s la policy stocastica sta sotto 0.1° solo nello 0.06 % dei passi.
+  - Al punto fisso l'osservazione vale q_vec ≈ (−0.0027, 0.0013, 0.0025) e l'azione deterministica è esattamente 0: la rete non reagisce a un errore di 0.45°.
+  - Conferma il limite "segnale in ingresso troppo piccolo" (§3). Il prossimo passo è riscalare l'errore d'assetto nell'osservazione.
+- Nota: al punto fisso resta una coppia residua (+,−,+,−)·0.0067·T_max. È nello spazio nullo della piramide, quindi non agisce sul corpo, ma consuma energia.
