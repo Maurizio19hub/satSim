@@ -286,3 +286,18 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 
 - Aggiunte a `rl/train.py` le opzioni `--resume` e `--out` per continuare un training esistente.
 - Decisione: prima di introdurre un bonus vicino al target, si continua l'addestramento per trovare il vero plateau.
+
+### 2026-09-28 — Ripresa: da 1 M a 2 M passi
+- Ripreso da 1 M con `--resume`, seed 1, 18 min.
+- `ep_rew_mean` da −72 a −65: sale ancora, ma più lentamente. La deviazione standard della policy è scesa da 0.26 a 0.15.
+- Confronto deterministico su 10 episodi (seed 100–109):
+
+  | | PPO 1 M | PPO 2 M | PD |
+  |---|---|---|---|
+  | Reward per episodio | −61.7 | −56.2 | −53.5 |
+  | Errore finale | 0.64° | 0.40° | 0.003° |
+  | Tempo per scendere sotto 1° | 15.1 s | 15.0 s | 12.2 s |
+  | \|α\| max | 10.1 °/s² | 8.7 °/s² | 6.2 °/s² |
+  | Energia | 69.7 J | 68.9 J | 61.3 J |
+
+- L'errore finale resta un offset costante, identico in tutti gli episodi: la policy converge a un punto fisso a ~0.4° dal target.
