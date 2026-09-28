@@ -7,8 +7,8 @@ controllore PD: ad ogni passo l'agente sceglie direttamente le coppie motore
 delle N ruote. La logica RL (spazi, osservazione, reward, terminazione) è
 documentata in rl/README.md.
 
-Stato attuale: prima versione. Osservazione = assetto e velocità angolare;
-reward = avvicinamento al target e penalità sulle accelerazioni oltre soglia.
+Stato attuale: v2. Osservazione = assetto e velocità angolare;
+reward = penalità lineare sull'errore d'assetto e sulle accelerazioni oltre soglia.
 
 Uso previsto:
 
@@ -64,7 +64,7 @@ OMEGA_SCALE = 0.1           # [rad/s]
 
 # Pesi e soglie della reward (vedi rl/README.md §5).
 REWARD_CONFIG = dict(
-    k_progress=1.0,         # reward per grado di avvicinamento al target in un passo
+    k_err=0.01,             # penalità per grado di errore d'assetto, per passo
     alpha_max_deg=2.0,      # soglia di accelerazione angolare per asse [°/s²]
     k_accel=0.01,           # penalità per ogni °/s² oltre la soglia, per asse
 )
@@ -95,7 +95,6 @@ class SatAttitudeEnv(gym.Env):
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(7,), dtype=np.float32)
 
         self._steps = 0
-        self._prev_err_deg = 0.0        # errore d'assetto al passo precedente
         self._prev_omega = np.zeros(3)  # ω al passo precedente (per l'accelerazione)
         self._alpha = np.zeros(3)       # accelerazione angolare dell'ultimo passo [rad/s²]
 
@@ -112,7 +111,6 @@ class SatAttitudeEnv(gym.Env):
         tel = self.engine.reset(q0=q0, omega0=omega0)
 
         self._steps = 0
-        self._prev_err_deg = tel.att_err_deg
         self._prev_omega = tel.omega
         self._alpha = np.zeros(3)
         return self._get_obs(tel), self._info(tel)
@@ -130,7 +128,6 @@ class SatAttitudeEnv(gym.Env):
         self._alpha = (tel.omega - self._prev_omega) / self.dt
         reward = self._compute_reward(tel, action)
 
-        self._prev_err_deg = tel.att_err_deg
         self._prev_omega = tel.omega
 
         terminated = False
@@ -140,17 +137,17 @@ class SatAttitudeEnv(gym.Env):
     def _compute_reward(self, tel: Telemetry, action: np.ndarray) -> float:
         """Reward del passo corrente.
 
-            r = k_progress · (θ_prev − θ)                       [θ in gradi]
-              − k_accel · Σ_assi max(0, |α_i| − α_max)          [α in °/s²]
+            r = − k_err · θ                                     [θ in gradi]
+                − k_accel · Σ_assi max(0, |α_i| − α_max)        [α in °/s²]
 
-        Il primo termine è positivo se l'assetto si avvicina al target, negativo
-        se si allontana. Il secondo penalizza solo le accelerazioni oltre soglia.
+        Il primo termine penalizza linearmente l'errore d'assetto: più il
+        satellite resta lontano dal target, e più a lungo, più perde. Il
+        secondo penalizza solo le accelerazioni oltre soglia.
         """
         c = self.reward_config
-        progress = self._prev_err_deg - tel.att_err_deg
         alpha_deg = np.degrees(np.abs(self._alpha))
         accel_excess = np.maximum(0.0, alpha_deg - c["alpha_max_deg"]).sum()
-        return float(c["k_progress"] * progress - c["k_accel"] * accel_excess)
+        return float(-c["k_err"] * tel.att_err_deg - c["k_accel"] * accel_excess)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
         """Osservazione: quaternione d'errore e velocità angolare normalizzata."""
