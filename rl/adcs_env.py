@@ -7,9 +7,8 @@ controllore PD: ad ogni passo l'agente sceglie direttamente le coppie motore
 delle N ruote. La logica RL (spazi, osservazione, reward, terminazione) è
 documentata in rl/README.md.
 
-Stato attuale: SCHELETRO. I metodi dell'ambiente sono vuoti e vanno
-implementati; la configurazione di PPO e la funzione di training sono già
-pronte per l'uso con Stable-Baselines3.
+Stato attuale: prima versione. Osservazione = assetto e velocità angolare;
+reward = avvicinamento al target e penalità sulle accelerazioni oltre soglia.
 
 Uso previsto:
 
@@ -27,6 +26,7 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.env_util import make_vec_env
 
 from satsim import SatelliteEngine, SimParams, Telemetry
+from satsim.quaternion import quat_from_axis_angle
 
 # =============================================================================
 # Configurazione
@@ -59,68 +59,106 @@ TRAIN_CONFIG = dict(
 # =============================================================================
 # Ambiente
 # =============================================================================
+# Scala di normalizzazione di ω nell'osservazione: 0.1 rad/s ≈ 5.7 °/s → ~1.
+OMEGA_SCALE = 0.1           # [rad/s]
+
+# Pesi e soglie della reward (vedi rl/README.md §5).
+REWARD_CONFIG = dict(
+    k_progress=1.0,         # reward per grado di avvicinamento al target in un passo
+    alpha_max_deg=2.0,      # soglia di accelerazione angolare per asse [°/s²]
+    k_accel=0.01,           # penalità per ogni °/s² oltre la soglia, per asse
+)
+
+
 class SatAttitudeEnv(gym.Env):
-    """Ambiente di controllo d'assetto: azione = coppie motore delle ruote."""
+    """Ambiente di controllo d'assetto: azione = coppie motore delle ruote.
+
+    Osservazione (7): [ q_err (4) | ω / OMEGA_SCALE (3) ]
+    Azione (N):       coppie motore normalizzate in [-1, 1], tau = action · T_max
+    """
 
     metadata = {"render_modes": []}
 
     def __init__(self, params: SimParams | None = None, max_episode_steps: int = 2000,
-                 render_mode: str | None = None):
-        """Inizializzazione dell'ambiente.
-
-        Da implementare:
-        - creare SatelliteEngine(params) e salvare dt, numero di ruote, T_max;
-        - definire self.action_space (Box normalizzato in [-1, 1]^N);
-        - definire self.observation_space (Box dell'osservazione);
-        - inizializzare contatori di episodio e pesi della reward.
-        """
+                 render_mode: str | None = None, reward_config: dict | None = None):
+        """Inizializzazione: engine fisico, spazi di azione e osservazione, parametri."""
         super().__init__()
-        # TODO: implementare
-        raise NotImplementedError
+        self.engine = SatelliteEngine(params)
+        self.dt = self.engine.dt
+        self.n_wheels = self.engine.rw.n
+        self.tau_max = self.engine.rw.tau_max
+        self.max_episode_steps = max_episode_steps
+        self.render_mode = render_mode
+        self.reward_config = {**REWARD_CONFIG, **(reward_config or {})}
+
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_wheels,), dtype=np.float32)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(7,), dtype=np.float32)
+
+        self._steps = 0
+        self._prev_err_deg = 0.0        # errore d'assetto al passo precedente
+        self._prev_omega = np.zeros(3)  # ω al passo precedente (per l'accelerazione)
+        self._alpha = np.zeros(3)       # accelerazione angolare dell'ultimo passo [rad/s²]
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
-        """Inizio di un nuovo episodio.
-
-        Da implementare:
-        - chiamare super().reset(seed=seed) per inizializzare self.np_random;
-        - campionare le condizioni iniziali (assetto, ω, velocità delle ruote);
-        - chiamare engine.reset(...) e azzerare i contatori.
+        """Nuovo episodio: assetto casuale a 40–80° dal target, ω casuale, ruote ferme.
 
         Ritorna: (observation, info)
         """
         super().reset(seed=seed)
-        # TODO: implementare
-        raise NotImplementedError
+        rng = self.np_random
+        axis = rng.normal(size=3)
+        q0 = quat_from_axis_angle(axis, np.radians(rng.uniform(40.0, 80.0)))
+        omega0 = rng.uniform(-0.05, 0.05, 3)
+        tel = self.engine.reset(q0=q0, omega0=omega0)
+
+        self._steps = 0
+        self._prev_err_deg = tel.att_err_deg
+        self._prev_omega = tel.omega
+        self._alpha = np.zeros(3)
+        return self._get_obs(tel), self._info(tel)
 
     def step(self, action: np.ndarray):
         """Un passo di controllo (Δt = params.dt).
 
-        Da implementare:
-        - denormalizzare l'azione: tau = clip(action, -1, 1) · T_max;
-        - avanzare la fisica: tel = engine.step(tau);
-        - calcolare osservazione, reward, terminated, truncated, info.
-
         Ritorna: (observation, reward, terminated, truncated, info)
         """
-        # TODO: implementare
-        raise NotImplementedError
+        tau = np.clip(action, -1.0, 1.0) * self.tau_max
+        tel = self.engine.step(tau)
+        self._steps += 1
 
-    def compute_reward(self, tel: Telemetry, action: np.ndarray) -> float:
-        """Reward del passo corrente, calcolata dalla telemetria.
+        # Accelerazione angolare dalla variazione di velocità tra due passi
+        self._alpha = (tel.omega - self._prev_omega) / self.dt
+        reward = self._compute_reward(tel, action)
 
-        Da implementare (termini candidati, vedi rl/README.md):
-        - penalità sull'errore d'assetto (tel.att_err_deg / tel.q_err);
-        - penalità sulla velocità angolare (tel.omega);
-        - penalità sullo sforzo di controllo / energia (action, tel.power_total);
-        - penalità sulla saturazione delle ruote (tel.wheel_saturation).
+        self._prev_err_deg = tel.att_err_deg
+        self._prev_omega = tel.omega
+
+        terminated = False
+        truncated = self._steps >= self.max_episode_steps
+        return self._get_obs(tel), reward, terminated, truncated, self._info(tel)
+
+    def _compute_reward(self, tel: Telemetry, action: np.ndarray) -> float:
+        """Reward del passo corrente.
+
+            r = k_progress · (θ_prev − θ)                       [θ in gradi]
+              − k_accel · Σ_assi max(0, |α_i| − α_max)          [α in °/s²]
+
+        Il primo termine è positivo se l'assetto si avvicina al target, negativo
+        se si allontana. Il secondo penalizza solo le accelerazioni oltre soglia.
         """
-        # TODO: implementare
-        raise NotImplementedError
+        c = self.reward_config
+        progress = self._prev_err_deg - tel.att_err_deg
+        alpha_deg = np.degrees(np.abs(self._alpha))
+        accel_excess = np.maximum(0.0, alpha_deg - c["alpha_max_deg"]).sum()
+        return float(c["k_progress"] * progress - c["k_accel"] * accel_excess)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
-        """Costruisce il vettore d'osservazione dalla telemetria (da implementare)."""
-        # TODO: implementare
-        raise NotImplementedError
+        """Osservazione: quaternione d'errore e velocità angolare normalizzata."""
+        return np.concatenate((tel.q_err, tel.omega / OMEGA_SCALE)).astype(np.float32)
+
+    def _info(self, tel: Telemetry) -> dict:
+        return dict(att_err_deg=tel.att_err_deg, alpha_deg=np.degrees(self._alpha),
+                    power=tel.power_total, wheel_saturation=tel.wheel_saturation.max())
 
 
 # =============================================================================
