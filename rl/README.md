@@ -2,7 +2,7 @@
 
 Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nel [README principale](../README.md).
 
-**Stato:** v3 dell'ambiente. Azione = variazione di coppia delle ruote. Osservazione = assetto + velocità angolare + coppia corrente. Reward = − errore d'assetto (lineare) − accelerazioni oltre soglia. Non ancora addestrato a convergenza.
+**Stato:** v5 dell'ambiente. Azione = variazione di coppia delle ruote. Osservazione = errore d'assetto in scala logaritmica + velocità angolare + coppia corrente. Reward = − errore d'assetto (lineare) − accelerazioni oltre soglia + bonus vicino al target. Non ancora addestrato a convergenza.
 
 ---
 
@@ -48,14 +48,27 @@ Le dipendenze vanno in un solo verso: `rl → satsim`. L'engine non importa null
 |---|---|---|
 | **Passo di controllo** | Un passo dell'engine, Δt = `params.dt` (0.05 s). Azione mantenuta costante sul passo (zero-order hold). | deciso |
 | **Azione** | `Box([-1, 1]^N)`: **variazione** della coppia motore di ogni ruota. `τ ← clip(τ + action · Δτ_max, ±T_max)` con `Δτ_max = DTAU_MAX_FRAC · T_max`. I limiti fisici (coppia e saturazione in velocità) restano applicati dall'engine. | v3 |
-| **Osservazione** | `Box(7 + N)`: `[q_err (4) , ω / OMEGA_SCALE (3) , τ / T_max (N)]`, cioè "posizione" (assetto rispetto al target), velocità angolare e coppia motore corrente. `OMEGA_SCALE = 0.1 rad/s`. | v3 |
+| **Osservazione** | `Box(6 + N)`: `[e_log (3) , ω / OMEGA_SCALE (3) , τ / T_max (N)]`, cioè errore d'assetto in scala logaritmica, velocità angolare e coppia motore corrente. `OMEGA_SCALE = 0.1 rad/s`. | v5 |
 | **Stato iniziale** | Assetto casuale a 40–80° dal target (asse casuale), `ω` uniforme in ±0.05 rad/s, ruote ferme, coppia nulla. Campionato con `self.np_random`. | v3 |
 | **Terminazione** | Nessuna: `terminated` è sempre `False`. | v1 |
 | **Troncamento** | `max_episode_steps` (default 2000 passi = 100 s). | deciso |
 
 ### Osservazione
 
-- **Posizione = `q_err`**, il quaternione d'errore `q_target* ⊗ q` con `q_e0 ≥ 0` (rotazione più breve). È la rappresentazione dell'assetto relativa al target: vale `[1, 0, 0, 0]` quando il satellite è allineato. Le componenti sono già in [−1, 1].
+- **Posizione = `e_log`** (v5), errore d'assetto in scala logaritmica:
+
+  $$
+  \mathbf e_{log} = \hat{\mathbf n}\;\frac{\ln(1+\theta/\theta_0)}{\ln(1+\pi/\theta_0)},\qquad \theta_0 = 0.1°
+  $$
+
+  Qui $\hat{\mathbf n}$ è l'asse e $\theta = 2\,\mathrm{atan2}(|\mathbf q_{vec}|, q_0)$ l'angolo del quaternione d'errore `q_err` (con $q_0 \ge 0$, rotazione più breve). Vale 0 sul target e ha modulo in [0, 1].
+
+  | θ | 0.01° | 0.1° | 0.45° | 1° | 10° | 60° | 180° |
+  |---|---|---|---|---|---|---|---|
+  | \|e_log\| | 0.013 | 0.092 | 0.23 | 0.32 | 0.62 | 0.85 | 1 |
+  | \|q_vec\| (v1–v4) | 0.0001 | 0.0009 | 0.0039 | 0.0087 | 0.087 | 0.5 | 1 |
+
+  Motivo: con `q_err` un errore di 0.45° entrava come ~0.003 e la rete non lo distingueva da zero (vedi registro v4). Con la scala logaritmica lo stesso errore vale 0.23, senza saturare alle grandi rotazioni. Limite: vicino a 180° l'asse cambia bruscamente (fuori dalla distribuzione degli stati iniziali, ≤ 80°).
 - **Velocità = `ω`** in body, divisa per `OMEGA_SCALE` per portarla a valori dell'ordine di 1 (la rete neurale di PPO lavora meglio con ingressi normalizzati).
 - **Coppia corrente = `τ / T_max`**, in [−1, 1]. Serve perché l'azione è una variazione: senza conoscere la coppia attuale l'agente non saprebbe che coppia sta applicando (stato non Markoviano).
 
@@ -319,3 +332,6 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - Al punto fisso l'osservazione vale q_vec ≈ (−0.0027, 0.0013, 0.0025) e l'azione deterministica è esattamente 0: la rete non reagisce a un errore di 0.45°.
   - Conferma il limite "segnale in ingresso troppo piccolo" (§3). Il prossimo passo è riscalare l'errore d'assetto nell'osservazione.
 - Nota: al punto fisso resta una coppia residua (+,−,+,−)·0.0067·T_max. È nello spazio nullo della piramide, quindi non agisce sul corpo, ma consuma energia.
+
+### 2026-09-28 — v5: errore d'assetto in scala logaritmica
+- `q_err` (4 valori) sostituito da `e_log` (3 valori, §3): l'osservazione passa da 11 a 10 valori. Reward invariata rispetto alla v4, quindi la baseline v4 resta valida.
