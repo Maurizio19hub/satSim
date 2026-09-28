@@ -190,6 +190,8 @@ pip install -r requirements.txt
 python -m rl.train                             # 1 M passi, 4 ambienti in sequenza
 python -m rl.train --subproc                   # 4 ambienti in 4 processi (più veloce)
 python -m rl.train --timesteps 24576           # prova breve: misura la velocità del proprio PC
+python -m rl.train --subproc --resume models/ppo_adcs --timesteps 1000000 --seed 1 --out models/ppo_adcs_2M
+                                               # continua un training già fatto per altri 1 M passi
 tensorboard --logdir runs/ppo_adcs             # curve di apprendimento
 ```
 
@@ -197,7 +199,14 @@ tensorboard --logdir runs/ppo_adcs             # curve di apprendimento
 1. `check_env` di SB3 per verificare la conformità all'API Gymnasium;
 2. `make_vec_env` con `n_envs = 4` ambienti (`DummyVecEnv`, oppure `SubprocVecEnv` con `--subproc`);
 3. `PPO.learn` per `total_timesteps = 1 000 000`;
-4. stampa della durata e salvataggio del modello in `models/ppo_adcs.zip`.
+4. stampa della durata e salvataggio del modello in `models/ppo_adcs.zip` (o nel percorso `--out`).
+
+### Continuare un addestramento (`--resume`)
+
+- `--resume <modello>` carica pesi della rete e stato dell'ottimizzatore di un modello salvato e continua per altri `--timesteps` passi. Gli iperparametri sono quelli salvati nel modello.
+- Il contatore dei passi prosegue (es. da 1 007 616) e TensorBoard continua la stessa curva.
+- Conviene usare un `--seed` diverso dal training precedente: con lo stesso seed l'ambiente ripeterebbe la stessa sequenza di condizioni iniziali.
+- `--out` evita di sovrascrivere il modello di partenza.
 
 Le cartelle `runs/` e `models/` sono escluse da git.
 
@@ -261,3 +270,19 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 - Training spostato in `rl/train.py` (headless, CLI con `--timesteps`, `--n-envs`, `--subproc`, `--seed`). `rl/adcs_env.py` contiene solo l'ambiente.
 - Nuovi test `tests/test_rl_env.py`: training senza moduli GUI, `check_env`, rate limit della coppia, reward nulla sul target.
 - Misurati i tempi di addestramento (§7).
+
+### 2026-09-28 — Primo addestramento (1 M passi) e ripresa del training
+- Primo training nel cloud: 1 M passi, `--subproc`, 19 min. `ep_rew_mean` da −2720 a −72.
+  - Fino a ~200 k passi resta piatta, tra 250 k e 480 k sale rapidamente, poi affina lentamente e a 1 M non è ancora piatta.
+- Confronto deterministico su 10 episodi (seed 100–109):
+
+  | | PPO (1 M) | PD |
+  |---|---|---|
+  | Reward per episodio | −61.7 | −53.5 |
+  | Tempo per scendere sotto 1° | 15.1 s | 12.2 s |
+  | Errore finale | 0.64° (identico in tutti gli episodi) | 0.003° |
+  | \|α\| max | 10.1 °/s² | 6.2 °/s² |
+  | Energia | 69.7 J | 61.3 J |
+
+- Aggiunte a `rl/train.py` le opzioni `--resume` e `--out` per continuare un training esistente.
+- Decisione: prima di introdurre un bonus vicino al target, si continua l'addestramento per trovare il vero plateau.

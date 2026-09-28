@@ -8,6 +8,7 @@ con `python main.py`.
 Uso:
     python -m rl.train                              # parametri di default
     python -m rl.train --timesteps 200000 --n-envs 4 --subproc
+    python -m rl.train --resume models/ppo_adcs --timesteps 1000000   # continua un training
 """
 from __future__ import annotations
 
@@ -44,27 +45,42 @@ TRAIN_CONFIG = dict(
     n_envs=4,               # copie del simulatore (vedi rl/README.md §7)
     subproc=False,          # True: una copia per processo (SubprocVecEnv), usa più core
     seed=0,
+    resume=None,            # percorso di un modello salvato da cui continuare (senza .zip)
     log_dir=Path("runs/ppo_adcs"),
     model_path=Path("models/ppo_adcs"),
 )
 
 
 def train(ppo_config: dict = PPO_CONFIG, train_config: dict = TRAIN_CONFIG) -> PPO:
-    """Addestra PPO sull'ambiente e salva il modello."""
+    """Addestra PPO sull'ambiente e salva il modello.
+
+    Con train_config["resume"] carica un modello già addestrato e continua
+    l'addestramento per altri total_timesteps passi: pesi della rete e stato
+    dell'ottimizzatore vengono ripresi, il contatore dei passi prosegue e
+    TensorBoard continua la stessa curva.
+    """
     check_env(SatAttitudeEnv(), warn=True)      # verifica la conformità all'API Gymnasium
 
     vec_env = make_vec_env(SatAttitudeEnv, n_envs=train_config["n_envs"],
                            seed=train_config["seed"],
                            vec_env_cls=SubprocVecEnv if train_config["subproc"] else DummyVecEnv)
-    model = PPO(env=vec_env, tensorboard_log=str(train_config["log_dir"]),
-                seed=train_config["seed"], **ppo_config)
+    resume = train_config["resume"]
+    if resume:
+        model = PPO.load(resume, env=vec_env, device=ppo_config.get("device", "auto"),
+                         tensorboard_log=str(train_config["log_dir"]))
+        print(f"Ripreso {resume}: {model.num_timesteps} passi già eseguiti")
+    else:
+        model = PPO(env=vec_env, tensorboard_log=str(train_config["log_dir"]),
+                    seed=train_config["seed"], **ppo_config)
 
     t0 = time.perf_counter()
-    model.learn(total_timesteps=train_config["total_timesteps"])
+    model.learn(total_timesteps=train_config["total_timesteps"],
+                reset_num_timesteps=not resume, tb_log_name="PPO")
     print(f"Addestramento completato in {(time.perf_counter() - t0) / 60:.1f} min")
 
     train_config["model_path"].parent.mkdir(parents=True, exist_ok=True)
     model.save(train_config["model_path"])
+    print(f"Modello salvato in {train_config['model_path']}.zip ({model.num_timesteps} passi totali)")
     vec_env.close()
     return model
 
@@ -75,9 +91,13 @@ def parse_args() -> dict:
     ap.add_argument("--n-envs", type=int, default=TRAIN_CONFIG["n_envs"])
     ap.add_argument("--subproc", action="store_true", help="un processo per ambiente")
     ap.add_argument("--seed", type=int, default=TRAIN_CONFIG["seed"])
+    ap.add_argument("--resume", type=Path, default=None,
+                    help="modello da cui continuare (es. models/ppo_adcs)")
+    ap.add_argument("--out", type=Path, default=TRAIN_CONFIG["model_path"],
+                    help="dove salvare il modello (default models/ppo_adcs)")
     a = ap.parse_args()
     return {**TRAIN_CONFIG, "total_timesteps": a.timesteps, "n_envs": a.n_envs,
-            "subproc": a.subproc, "seed": a.seed}
+            "subproc": a.subproc, "seed": a.seed, "resume": a.resume, "model_path": a.out}
 
 
 if __name__ == "__main__":
