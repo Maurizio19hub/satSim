@@ -135,6 +135,14 @@ Il PD del simulatore non è stato progettato con un limite di accelerazione: il 
 
 Fonti: [MinXSS-1 On-Orbit Pointing and Power Performance (arXiv:1706.06967)](https://arxiv.org/abs/1706.06967); [Nanobob, ST200 (arXiv:1711.01886)](https://arxiv.org/pdf/1711.01886).
 
+**Verifica v2 (episodio con seed 1, 2000 passi).**
+
+| Policy | Return | Errore finale |
+|---|---|---|
+| Azioni nulle (satellite libero) | −2539 | 121° |
+| Azioni casuali | −2915 | 103° |
+| PD al posto dell'agente | −75 | 0.003° |
+
 ### Storia: v1 (reward differenziale)
 
 La v1 usava $r_t = k_{prog}(\theta_{t-1}-\theta_t)$ al posto del termine d'errore. È stata abbandonata per due motivi:
