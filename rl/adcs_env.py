@@ -7,11 +7,11 @@ controllore PD. Non importa nulla della GUI né di Stable-Baselines3: è solo
 fisica + interfaccia Gymnasium. La logica RL (spazi, osservazione, reward)
 è documentata in rl/README.md.
 
-Stato attuale: v3.
+Stato attuale: v4.
 - Azione = variazione della coppia motore di ogni ruota (coppia rate-limited).
 - Osservazione = assetto, velocità angolare e coppia motore corrente.
 - Reward = penalità lineare sull'errore d'assetto e sulle accelerazioni
-  oltre soglia.
+  oltre soglia + bonus per ogni passo vicino al target.
 """
 from __future__ import annotations
 
@@ -34,6 +34,8 @@ REWARD_CONFIG = dict(
     k_err=0.01,             # penalità per grado di errore d'assetto, per passo
     alpha_max_deg=2.0,      # soglia di accelerazione angolare per asse [°/s²]
     k_accel=0.01,           # penalità per ogni °/s² oltre la soglia, per asse
+    bonus=0.02,             # bonus per ogni passo con errore d'assetto sotto soglia
+    bonus_theta_deg=0.1,    # soglia d'errore per il bonus [°]
 )
 
 
@@ -113,15 +115,19 @@ class SatAttitudeEnv(gym.Env):
 
             r = − k_err · θ                                     [θ in gradi]
                 − k_accel · Σ_assi max(0, |α_i| − α_max)        [α in °/s²]
+                + bonus · [θ < θ_bonus]
 
         Il primo termine penalizza linearmente l'errore d'assetto: più il
         satellite resta lontano dal target, e più a lungo, più perde. Il
-        secondo penalizza solo le accelerazioni oltre soglia.
+        secondo penalizza solo le accelerazioni oltre soglia. Il terzo premia
+        ogni passo trascorso vicino al target, quindi il restarci.
         """
         c = self.reward_config
         alpha_deg = np.degrees(np.abs(self._alpha))
         accel_excess = np.maximum(0.0, alpha_deg - c["alpha_max_deg"]).sum()
-        return float(-c["k_err"] * tel.att_err_deg - c["k_accel"] * accel_excess)
+        on_target = tel.att_err_deg < c["bonus_theta_deg"]
+        return float(-c["k_err"] * tel.att_err_deg - c["k_accel"] * accel_excess
+                     + c["bonus"] * on_target)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
         """Osservazione: quaternione d'errore, ω normalizzata, coppia corrente normalizzata."""

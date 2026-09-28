@@ -47,11 +47,11 @@ def test_action_is_rate_limited_torque_change():
     np.testing.assert_allclose(obs2[7:], obs[7:])
 
 
-def test_reward_is_zero_on_target_at_rest():
+def test_reward_is_bonus_on_target_at_rest():
     env = SatAttitudeEnv()
     env.reset(seed=0)
     env.engine.reset()                     # assetto = target, ω = 0
     env._prev_omega = env.engine.omega
     env._tau[:] = 0.0
     _, r, *_ = env.step(np.zeros(env.n_wheels, dtype=np.float32))
-    assert abs(r) < 1e-3
+    assert abs(r - env.reward_config["bonus"]) < 1e-3
