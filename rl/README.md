@@ -184,7 +184,7 @@ Iperparametri iniziali (`PPO_CONFIG` in `train.py`, default di SB3, da tarare):
 
 | Parametro | Valore |
 |---|---|
-| `learning_rate` | 3e-4 |
+| `learning_rate` | 3e-4 → 0 lineare (`linear_schedule`, dalla v6) |
 | `n_steps` | 2048 |
 | `batch_size` | 64 |
 | `n_epochs` | 10 |
@@ -200,7 +200,7 @@ Iperparametri iniziali (`PPO_CONFIG` in `train.py`, default di SB3, da tarare):
 
 ```bash
 pip install -r requirements.txt
-python -m rl.train                             # 1 M passi, 4 ambienti in sequenza
+python -m rl.train                             # 2 M passi, 4 ambienti in sequenza
 python -m rl.train --subproc                   # 4 ambienti in 4 processi (più veloce)
 python -m rl.train --timesteps 24576           # prova breve: misura la velocità del proprio PC
 python -m rl.train --subproc --resume models/ppo_adcs --timesteps 1000000 --seed 1 --out models/ppo_adcs_2M
@@ -213,6 +213,13 @@ tensorboard --logdir runs/ppo_adcs             # curve di apprendimento
 2. `make_vec_env` con `n_envs = 4` ambienti (`DummyVecEnv`, oppure `SubprocVecEnv` con `--subproc`);
 3. `PPO.learn` per `total_timesteps = 1 000 000`;
 4. stampa della durata e salvataggio del modello in `models/ppo_adcs.zip` (o nel percorso `--out`).
+
+### Validazione e modello migliore (dalla v6)
+
+- Ogni `--eval-every` passi (default 100 k) la policy deterministica viene valutata sui seed di **validazione** 200–209.
+- Se la reward media è la migliore vista finora, il modello è salvato in `<out>_best.zip`. A fine training ci sono quindi due modelli: il finale (`<out>.zip`) e il migliore (`<out>_best.zip`).
+- I seed di **test** 100–109 (`rl/evaluate.py`) non vengono mai usati per scegliere il modello: servono solo al confronto finale con il PD.
+- Costo: ~25 s per valutazione, ~8 min su 2 M passi. I valori vanno anche su TensorBoard (`eval/mean_reward`, `eval/final_err_deg`).
 
 ### Continuare un addestramento (`--resume`)
 
@@ -386,3 +393,9 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   1. Senza checkpoint il modello migliore del training (intorno a 1.42 M) è andato perso.
   2. `ep_rew_mean` (policy stocastica) e valutazione deterministica non vanno nella stessa direzione.
   3. Con learning rate costante, la fase di rifinitura è instabile.
+
+### 2026-09-28 — v6: learning rate decrescente e modello migliore
+- Learning rate lineare da 3e-4 a 0. `total_timesteps` di default portato a 2 M.
+- Valutazione periodica sui seed di validazione 200–209, con salvataggio del modello migliore (`--eval-every`).
+- Nessuna modifica ad ambiente, osservazione o reward (baseline v4 valida).
+- Opzione rimandata: campionare più spesso le condizioni iniziali difficili (θ0 vicino a 80°).
