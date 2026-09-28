@@ -335,3 +335,27 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 
 ### 2026-09-28 — v5: errore d'assetto in scala logaritmica
 - `q_err` (4 valori) sostituito da `e_log` (3 valori, §3): l'osservazione passa da 11 a 10 valori. Reward invariata rispetto alla v4, quindi la baseline v4 resta valida.
+- Training v5 (1 M passi da zero, 18 min).
+  - `ep_rew_mean` da −2590 a −73.5. Parte più lento della v4 (piatta fino a ~350 k passi) e a 1 M passi sale ancora ripidamente: −108 → −73.5 negli ultimi 80 k.
+  - La deviazione standard della policy è ancora 0.49 (v4: 0.26).
+- Valutazione (seed 100–109):
+
+  | | PPO v5 | PD |
+  |---|---|---|
+  | Reward | −29.8 | −19.5 |
+  | Errore finale | **0.0042°** (v4: 0.448°) | 0.0031° |
+  | Tempo per scendere sotto 1° | **12.0 s** | 12.2 s |
+  | Tempo per scendere sotto 0.1° | **13.7 s** | 15.1 s |
+  | \|α\| max | 10.4 °/s² | 6.2 °/s² |
+  | Energia | 71.6 J | 61.3 J |
+
+  - `[--]` reward ≥ PD; `[OK]` errore finale ≤ 0.01° su tutti i seed.
+- Scomposizione della reward (media sui seed):
+
+  | | Termine d'errore | Termine d'accelerazione | Bonus |
+  |---|---|---|---|
+  | PPO | −62.1 | −2.1 | +34.5 |
+  | PD | −52.6 | −0.9 | +34.0 |
+
+  Il distacco viene quasi tutto dal termine d'errore, cioè dall'area sotto θ(t) durante la manovra grande. Sui seed 101, 103 e 107 l'agente arriva sotto 0.1° solo dopo 17–21 s.
+- Conclusione: la scala logaritmica ha eliminato l'offset. Resta da migliorare la manovra grande su alcuni seed.
