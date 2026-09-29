@@ -448,3 +448,22 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - Errore finale per seed: 0.008° su 8 seed, 0.0145° sul seed 104, 0.0526° sul seed 109.
   - Reward migliore del PD su 7 seed su 10, peggiore su 103 (−45.0 vs −16.7), 107 (−11.7 vs −7.8) e 108 (6.8 vs 14.6).
 - Osservazione: l'agente si ferma appena dentro l'ultima soglia di bonus. Nella v6 si fermava a 0.03° con soglia 0.1°, nella v7 a 0.008° con soglia 0.01°. Sotto l'ultima soglia la reward non premia altra precisione, quindi l'errore residuo è determinato dalla posizione della soglia.
+
+### 2026-09-29 — v8: penalità logaritmica sull'errore
+- Reward: alla penalità lineare si aggiunge `−0.02 · ln(1 + θ/0.01°)` (`k_log`, `log_theta0_deg`). Bonus e penalità sulle accelerazioni sono invariati.
+  - La parte lineare domina agli angoli grandi e mantiene la spinta a fare in fretta la manovra.
+  - La parte logaritmica domina sotto ~1° e premia ogni miglioramento di precisione anche sotto le soglie dei bonus: da 0.01° a 0.001° vale 0.012 per passo, contro 0.00009 della sola lineare.
+- Motivo: nelle v6 e v7 l'agente si fermava appena dentro l'ultima soglia di bonus (0.03° con soglia 0.1°, 0.008° con soglia 0.01°).
+- Penalità d'errore totale per passo:
+
+  | θ | 60° | 10° | 1° | 0.1° | 0.01° | 0.001° |
+  |---|---|---|---|---|---|---|
+  | Penalità | 0.77 | 0.24 | 0.10 | 0.049 | 0.014 | 0.002 |
+
+- Baseline v8 (seed 100–109):
+
+  | | Reward | Errore finale |
+  |---|---|---|
+  | PD | **−42.9** | 0.0031° |
+  | Satellite libero | −2670 | 131° |
+  | Azioni casuali | −3135 | 130° |

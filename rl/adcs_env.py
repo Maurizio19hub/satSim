@@ -7,11 +7,11 @@ controllore PD. Non importa nulla della GUI né di Stable-Baselines3: è solo
 fisica + interfaccia Gymnasium. La logica RL (spazi, osservazione, reward)
 è documentata in rl/README.md.
 
-Stato attuale: v7.
+Stato attuale: v8.
 - Azione = variazione della coppia motore di ogni ruota (coppia rate-limited).
 - Osservazione = errore d'assetto in scala logaritmica, velocità angolare e
   coppia motore corrente.
-- Reward = penalità lineare sull'errore d'assetto e sulle accelerazioni
+- Reward = penalità lineare + logaritmica sull'errore d'assetto e sulle accelerazioni
   oltre soglia + due bonus per ogni passo vicino al target (0.1° e 0.01°).
 """
 from __future__ import annotations
@@ -39,6 +39,8 @@ DTAU_MAX_FRAC = 0.2
 # Pesi e soglie della reward (vedi rl/README.md §5).
 REWARD_CONFIG = dict(
     k_err=0.01,             # penalità per grado di errore d'assetto, per passo
+    k_log=0.02,             # peso della penalità logaritmica sull'errore
+    log_theta0_deg=0.01,    # scala della penalità logaritmica [°]
     alpha_max_deg=2.0,      # soglia di accelerazione angolare per asse [°/s²]
     k_accel=0.01,           # penalità per ogni °/s² oltre la soglia, per asse
     bonus=0.02,             # bonus per ogni passo con errore d'assetto sotto soglia
@@ -138,12 +140,14 @@ class SatAttitudeEnv(gym.Env):
     def _compute_reward(self, tel: Telemetry, action: np.ndarray) -> float:
         """Reward del passo corrente.
 
-            r = − k_err · θ                                     [θ in gradi]
+            r = − k_err · θ − k_log · ln(1 + θ/θ0)              [θ in gradi]
                 − k_accel · Σ_assi max(0, |α_i| − α_max)        [α in °/s²]
                 + bonus · [θ < θ_bonus] + bonus2 · [θ < θ_bonus2]
 
-        Il primo termine penalizza linearmente l'errore d'assetto: più il
-        satellite resta lontano dal target, e più a lungo, più perde. Il
+        Il primo termine penalizza l'errore d'assetto: la parte lineare domina
+        agli angoli grandi (spinge a fare in fretta la manovra), quella
+        logaritmica agli angoli piccoli (premia ogni miglioramento di
+        precisione, anche sotto le soglie dei bonus). Il
         secondo penalizza solo le accelerazioni oltre soglia. I bonus premiano
         ogni passo trascorso vicino al target (0.1°) e molto vicino (0.01°),
         quindi il restarci con la precisione richiesta.
@@ -154,7 +158,8 @@ class SatAttitudeEnv(gym.Env):
         theta = tel.att_err_deg
         bonus = (c["bonus"] * (theta < c["bonus_theta_deg"])
                  + c["bonus2"] * (theta < c["bonus2_theta_deg"]))
-        return float(-c["k_err"] * theta - c["k_accel"] * accel_excess + bonus)
+        err_pen = c["k_err"] * theta + c["k_log"] * np.log1p(theta / c["log_theta0_deg"])
+        return float(-err_pen - c["k_accel"] * accel_excess + bonus)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
         """Osservazione: errore d'assetto in scala log, ω normalizzata, coppia corrente normalizzata."""
