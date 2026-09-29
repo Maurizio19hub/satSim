@@ -430,3 +430,21 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 
   Il PD sta sotto 0.01° per gran parte dell'episodio e guadagna +29.5 rispetto alla v6.
 - Training: 2 M passi da zero, stesse impostazioni della v6.
+- Training v7 (2 M passi, 46 min).
+  - `ep_rew_mean` quasi identica alla v6: da −2590 a −31. La reward d'addestramento (policy stocastica) raccoglie poco il bonus di precisione.
+  - Validazione: reward da −2506 a **+24.7** (1.8 M passi, modello migliore). Errore finale 0.003–0.009° da 1.1 M in poi.
+  - All'ultima valutazione (2 M) la validazione crolla a −8.6 (errore 0.0109°): il modello finale è peggiore del migliore.
+- Test (seed 100–109):
+
+  | | PPO v7 migliore | PPO v7 finale | PD |
+  |---|---|---|---|
+  | Reward | **+13.4** | −17.3 | +10.0 |
+  | Errore finale medio | 0.0131° | 0.0107° | 0.0031° |
+  | Tempo per scendere sotto 1° | **9.2 s** | 9.3 s | 12.2 s |
+  | \|α\| max | 10.9 °/s² | 10.7 °/s² | 6.2 °/s² |
+  | Energia | 71.9 J | 69.2 J | 61.3 J |
+
+  - Modello migliore: `[OK]` reward ≥ PD; `[--]` errore finale ≤ 0.01° (8 seed su 10).
+  - Errore finale per seed: 0.008° su 8 seed, 0.0145° sul seed 104, 0.0526° sul seed 109.
+  - Reward migliore del PD su 7 seed su 10, peggiore su 103 (−45.0 vs −16.7), 107 (−11.7 vs −7.8) e 108 (6.8 vs 14.6).
+- Osservazione: l'agente si ferma appena dentro l'ultima soglia di bonus. Nella v6 si fermava a 0.03° con soglia 0.1°, nella v7 a 0.008° con soglia 0.01°. Sotto l'ultima soglia la reward non premia altra precisione, quindi l'errore residuo è determinato dalla posizione della soglia.
