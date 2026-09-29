@@ -33,6 +33,9 @@ rl/
 ├── __init__.py
 ├── adcs_env.py     # ambiente Gymnasium SatAttitudeEnv (solo fisica, niente SB3 né GUI)
 ├── train.py        # addestramento PPO con Stable-Baselines3 (headless)
+├── evaluate.py     # confronto di un modello con PD e riferimenti sui seed di test
+├── pretrained/
+│   └── ppo_adcs_v8.zip   # modello v8 migliore (1.7 M passi), criteri di successo raggiunti
 └── README.md       # questo documento
 ```
 
@@ -485,3 +488,4 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - L'errore finale è 10 volte più piccolo di quello del PD.
 - Il modello finale (2 M) è molto peggiore del migliore: su un seed si ferma a 1.39°. Conferma che il salvataggio del modello migliore è indispensabile.
 - Restano peggiori del PD accelerazioni (14.1 vs 6.2 °/s²) ed energia (69.1 vs 61.3 J).
+- Il modello migliore v8 è pubblicato in `rl/pretrained/ppo_adcs_v8.zip` (156 KB), come eccezione alla regola di non versionare i modelli (`models/` resta in `.gitignore`). Per verificarlo: `python -m rl.evaluate rl/pretrained/ppo_adcs_v8`. È valido solo con il codice v8: osservazione 10 valori, azione come variazione di coppia.
