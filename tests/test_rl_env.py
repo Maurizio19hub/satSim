@@ -55,7 +55,8 @@ def test_reward_is_bonus_on_target_at_rest():
     env._prev_omega = env.engine.omega
     env._tau[:] = 0.0
     _, r, *_ = env.step(np.zeros(env.n_wheels, dtype=np.float32))
-    assert abs(r - env.reward_config["bonus"]) < 1e-3
+    c = env.reward_config
+    assert abs(r - (c["bonus"] + c["bonus2"])) < 1e-3
 
 
 def test_log_attitude_error():

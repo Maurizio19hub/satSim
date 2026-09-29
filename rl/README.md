@@ -416,3 +416,17 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - `[OK]` reward ≥ PD; `[--]` errore finale ≤ 0.01°.
   - Più rapido del PD su 9 seed su 10. Reward migliore su 7 seed su 10, peggiore su 103 (−69.5 vs −45.8), 107 (−39.4 vs −37.2) e 108 (−25.0 vs −14.9).
 - Osservazione: sotto 0.1° la reward è quasi indifferente all'errore. Il termine lineare a 0.03° vale −0.0003 per passo e il bonus è già preso. Il criterio "≤ 0.01°" non è quindi rappresentato nella reward: l'agente ha scambiato precisione residua per velocità.
+
+### 2026-09-29 — v7: secondo bonus di precisione
+- Reward: al bonus `+0.02` per θ < 0.1° si somma un secondo bonus `+0.02` per θ < 0.01°. Sotto 0.01° il premio per passo vale quindi 0.04. Parametri `bonus2`, `bonus2_theta_deg` in `REWARD_CONFIG`.
+- Motivo: nella v6 la reward era quasi indifferente all'errore sotto 0.1°, quindi il criterio "errore finale ≤ 0.01°" non veniva premiato.
+- Baseline v7 (seed 100–109):
+
+  | | Reward | Errore finale |
+  |---|---|---|
+  | PD | **+10.0** | 0.0031° |
+  | Satellite libero | −2300 | 131° |
+  | Azioni casuali | −2759 | 130° |
+
+  Il PD sta sotto 0.01° per gran parte dell'episodio e guadagna +29.5 rispetto alla v6.
+- Training: 2 M passi da zero, stesse impostazioni della v6.
