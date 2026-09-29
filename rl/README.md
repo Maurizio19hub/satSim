@@ -399,3 +399,20 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 - Valutazione periodica sui seed di validazione 200–209, con salvataggio del modello migliore (`--eval-every`).
 - Nessuna modifica ad ambiente, osservazione o reward (baseline v4 valida).
 - Opzione rimandata: campionare più spesso le condizioni iniziali difficili (θ0 vicino a 80°).
+- Training v6 (2 M passi da zero, 44 min comprese le valutazioni).
+  - `ep_rew_mean` da −2590 a −30, crescita regolare senza ricadute: −222 a 811 k, −82 a 1 M, −45 a 1.4 M, −30 a 2 M.
+  - Validazione (seed 200–209): reward da −2506 a **−8.6**, migliorata quasi a ogni valutazione. Il modello migliore coincide praticamente con il finale (2 M).
+  - Errore finale in validazione: minimo 0.0024° a 1.1 M, poi risale a 0.029°. La reward continua a migliorare perché l'agente diventa più veloce.
+- Test (seed 100–109), modello migliore:
+
+  | | PPO v6 | PD |
+  |---|---|---|
+  | Reward | **−17.1** | −19.5 |
+  | Errore finale | 0.029° | 0.0031° |
+  | Tempo per scendere sotto 1° | **9.1 s** | 12.2 s |
+  | \|α\| max | 11.5 °/s² | 6.2 °/s² |
+  | Energia | 68.6 J | 61.3 J |
+
+  - `[OK]` reward ≥ PD; `[--]` errore finale ≤ 0.01°.
+  - Più rapido del PD su 9 seed su 10. Reward migliore su 7 seed su 10, peggiore su 103 (−69.5 vs −45.8), 107 (−39.4 vs −37.2) e 108 (−25.0 vs −14.9).
+- Osservazione: sotto 0.1° la reward è quasi indifferente all'errore. Il termine lineare a 0.03° vale −0.0003 per passo e il bonus è già preso. Il criterio "≤ 0.01°" non è quindi rappresentato nella reward: l'agente ha scambiato precisione residua per velocità.
