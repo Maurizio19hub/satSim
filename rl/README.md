@@ -467,3 +467,21 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   | PD | **−42.9** | 0.0031° |
   | Satellite libero | −2670 | 131° |
   | Azioni casuali | −3135 | 130° |
+- Training v8 (2 M passi, 46 min).
+  - `ep_rew_mean` da −2970 a −84.
+  - Validazione: reward da −2970 a **−11.2** (1.7 M passi, modello migliore). Errore finale 0.0003–0.002° da 1.2 M passi in poi.
+- Test (seed 100–109):
+
+  | | PPO v8 migliore | PPO v8 finale | PD |
+  |---|---|---|---|
+  | Reward | **−27.8** | −48.5 | −42.9 |
+  | Errore finale | **0.0003°** (tutti i seed) | 0.14° (max 1.39°) | 0.0031° |
+  | Tempo per scendere sotto 1° | **10.8 s** | 10.6 s | 12.2 s |
+  | \|α\| max | 14.1 °/s² | 14.2 °/s² | 6.2 °/s² |
+  | Energia | 69.1 J | 70.6 J | 61.3 J |
+
+  - Modello migliore: **`[OK]` reward ≥ PD; `[OK]` errore finale ≤ 0.01° su tutti i seed.** Entrambi i criteri di successo sono soddisfatti.
+  - Reward migliore del PD su 8 seed su 10. Sul seed 101 è peggiore (−56.4 vs −49.2), sul 103 è praticamente pari (−74.9 vs −74.4).
+  - L'errore finale è 10 volte più piccolo di quello del PD.
+- Il modello finale (2 M) è molto peggiore del migliore: su un seed si ferma a 1.39°. Conferma che il salvataggio del modello migliore è indispensabile.
+- Restano peggiori del PD accelerazioni (14.1 vs 6.2 °/s²) ed energia (69.1 vs 61.3 J).
