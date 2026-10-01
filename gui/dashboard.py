@@ -7,14 +7,14 @@ Pannelli della dashboard di telemetria:
 """
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QGridLayout, QGroupBox, QLabel, QPlainTextEdit,
                                QProgressBar, QVBoxLayout, QWidget)
 
 from satsim.quaternion import quat_to_euler_zyx_deg
 
-MONO = QFont("DejaVu Sans Mono", 9)
-MONO.setStyleHint(QFont.Monospace)
+from . import theme
+
+MONO = theme.mono_font(9)
 
 PEN_XYZ = [pg.mkPen((255, 90, 90), width=1.5), pg.mkPen((90, 230, 90), width=1.5),
            pg.mkPen((100, 150, 255), width=1.5)]
@@ -27,14 +27,14 @@ PEN_WHEELS = [pg.mkPen(c, width=1.5) for c in
 class TelemetryPlots(pg.GraphicsLayoutWidget):
     def __init__(self, n_wheels: int, max_rpm: float, parent=None):
         super().__init__(parent)
-        self.setBackground((16, 18, 24))
+        self.setBackground(theme.SURFACE)
+        self.ci.setContentsMargins(6, 6, 10, 6)
         self.plots = []
 
         def add_plot(title, units, row):
-            p = self.addPlot(row=row, col=0, title=title)
-            p.showGrid(x=True, y=True, alpha=0.25)
-            p.setLabel("left", units)
-            p.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(20, 20, 30, 160))
+            p = self.addPlot(row=row, col=0)
+            theme.style_plot(p, title, units)
+            p.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(25, 28, 35, 200))
             if self.plots:
                 p.setXLink(self.plots[0])
             self.plots.append(p)
@@ -58,7 +58,7 @@ class TelemetryPlots(pg.GraphicsLayoutWidget):
 
         p = add_plot("Potenza elettrica ruote", "W", 4)
         self.c_pow = p.plot(pen=pg.mkPen((255, 120, 200), width=1.5), name="P_tot")
-        self.plots[-1].setLabel("bottom", "tempo simulato", "s")
+        self.plots[-1].setLabel("bottom", "tempo simulato [s]", color=theme.MUTED)
 
     def update_curves(self, h: dict):
         t = h["t"]
@@ -127,7 +127,7 @@ class TelemetryPanel(QWidget):
             sat = tel.wheel_saturation[i]
             bar.setValue(int(sat * 1000))
             bar.setFormat(f"{tel.wheel_rpm[i]:+7.0f} RPM  ({sat * 100:5.1f}%)")
-            color = "#3c9" if sat < 0.7 else ("#fb3" if sat < 0.95 else "#f44")
+            color = theme.SUCCESS if sat < 0.7 else (theme.WARNING if sat < 0.95 else theme.DANGER)
             bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {color}; }}")
         pw = " ".join(f"{p:.3f}" for p in tel.power_wheels)
         self.lab_pow.setText(

@@ -8,52 +8,61 @@ rl/compare.py; questa finestra visualizza soltanto.
 """
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QElapsedTimer, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QSize, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QComboBox, QGridLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QMainWindow, QPushButton, QSpinBox,
-                               QSplitter, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
+                               QLabel, QMainWindow, QProgressBar, QPushButton,
+                               QSizePolicy, QSpinBox, QSplitter, QVBoxLayout,
+                               QWidget)
 
 from rl.compare import IMPULSE_DURATION, IMPULSE_TORQUE, Comparison
 
-from .dashboard import MONO
+from . import theme
 from .view3d import AttitudeView
 
 FRAME_MS = 33
 MAX_STEPS_PER_FRAME = 200
-COLORS = {"PPO": (80, 170, 255), "PD": (255, 160, 60)}
+COLORS = {"PPO": theme.PPO_COLOR, "PD": theme.PD_COLOR}
+SPEEDS = [0.5, 1, 2, 5, 10]
 SEED_MAX = 2**31 - 1
 
 
-def _dash(color=(200, 80, 80)):
+def card(parent=None) -> QFrame:
+    f = QFrame(parent)
+    f.setObjectName("card")
+    return f
+
+
+def _dash(color=theme.DANGER):
     return pg.mkPen(color, width=1, style=Qt.DashLine)
 
 
+# =============================================================================
 class ComparePlots(pg.GraphicsLayoutWidget):
     """Grafici con le curve di PPO e PD sovrapposte."""
 
     SPECS = [  # (chiave storico, titolo, unità, scala log)
-        ("err", "Errore d'assetto (scala log)", "deg", True),
+        ("err", "Errore d'assetto", "deg (log)", True),
         ("w", "Velocità angolare |ω|", "deg/s", False),
-        ("alpha", "Accelerazione angolare max_i |α_i|", "deg/s²", False),
-        ("rpm", "Velocità ruote max |Ω|", "RPM", False),
+        ("alpha", "Accelerazione angolare  max |α_i|", "deg/s²", False),
+        ("rpm", "Velocità ruote  max |Ω|", "RPM", False),
         ("power", "Potenza elettrica ruote", "W", False),
     ]
 
     def __init__(self, alpha_max_deg: float, max_rpm: float, parent=None):
         super().__init__(parent)
-        self.setBackground((16, 18, 24))
+        self.setBackground(theme.SURFACE)
+        self.ci.setContentsMargins(6, 6, 10, 6)
+        self.ci.setSpacing(4)
         self.curves = {}
         first = None
         for row, (key, title, units, log) in enumerate(self.SPECS):
-            p = self.addPlot(row=row, col=0, title=title)
-            p.showGrid(x=True, y=True, alpha=0.25)
-            p.setLabel("left", units)
-            p.addLegend(offset=(5, 5), labelTextSize="8pt", brush=(20, 20, 30, 160))
+            p = self.addPlot(row=row, col=0)
+            theme.style_plot(p, title, units)
             if log:
                 p.setLogMode(y=True)
                 for th in (1.0, 0.01):          # 1°, soglia del criterio di successo
-                    p.addItem(pg.InfiniteLine(pos=np.log10(th), angle=0, pen=_dash((120, 120, 140))))
+                    p.addItem(pg.InfiniteLine(pos=np.log10(th), angle=0, pen=_dash(theme.MUTED)))
             if key == "alpha":
                 p.addItem(pg.InfiniteLine(pos=alpha_max_deg, angle=0, pen=_dash()))
             if key == "rpm":
@@ -62,9 +71,8 @@ class ComparePlots(pg.GraphicsLayoutWidget):
                 first = p
             else:
                 p.setXLink(first)
-            self.curves[key] = {name: p.plot(pen=pg.mkPen(c, width=1.8), name=name)
-                                for name, c in COLORS.items()}
-        p.setLabel("bottom", "tempo simulato", "s")
+            self.curves[key] = {name: p.plot(pen=pg.mkPen(c, width=2)) for name, c in COLORS.items()}
+        p.setLabel("bottom", "tempo simulato [s]", color=theme.MUTED)
 
     def update_curves(self, runs):
         for r in runs:
@@ -75,57 +83,134 @@ class ComparePlots(pg.GraphicsLayoutWidget):
                 c[r.name].setData(h["t"], h[key])
 
 
+# =============================================================================
+class MetricCard(QFrame):
+    """Una grandezza con i valori di PPO e PD affiancati; il migliore evidenziato."""
+
+    def __init__(self, title: str, unit: str, better: str = "low", fmt: str = ".2f"):
+        super().__init__()
+        self.setObjectName("card")
+        self.better, self.fmt, self.unit = better, fmt, unit
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setSpacing(2)
+        t = QLabel(title)
+        t.setObjectName("cardTitle")
+        lay.addWidget(t)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self.vals = {}
+        for name, color in COLORS.items():
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            tag = QLabel(name)
+            tag.setStyleSheet(f"color: {color}; font-size: 8pt; font-weight: 600;")
+            v = QLabel("–")
+            v.setStyleSheet("font-size: 14pt; font-weight: 600;")
+            col.addWidget(tag)
+            col.addWidget(v)
+            row.addLayout(col)
+            self.vals[name] = v
+        row.addStretch()
+        lay.addLayout(row)
+
+    def set_values(self, ppo, pd):
+        vals = {"PPO": ppo, "PD": pd}
+        best = None
+        if ppo is not None and pd is not None and self.better and abs(ppo - pd) > 1e-12:
+            best = ("PPO" if ppo < pd else "PD") if self.better == "low" else ("PPO" if ppo > pd else "PD")
+        for name, lab in self.vals.items():
+            x = vals[name]
+            txt = "–" if x is None else f"{format(x, self.fmt)} {self.unit}".strip()
+            lab.setText(txt)
+            weight = 700 if name == best else 500
+            color = theme.SUCCESS if name == best else theme.TEXT
+            lab.setStyleSheet(f"font-size: 14pt; font-weight: {weight}; color: {color};")
+
+
+# =============================================================================
 class CompareWindow(QMainWindow):
     def __init__(self, model_path: str, seed: int = 0, speed: float = 1.0):
         super().__init__()
         self.cmp = Comparison(model_path, seed)
         self.paused = False
-        self.speed = speed
+        self.speed = speed if speed in SPEEDS else 1
         self._acc = 0.0
         self.rng = np.random.default_rng()
+        self.episode_s = self.cmp.runs[0].env.max_episode_steps * self.cmp.dt
 
         self.setWindowTitle("satSim — Confronto PPO vs PD")
-        self.resize(1760, 1000)
+        self.resize(1760, 1020)
+
+        root = QWidget()
+        rv = QVBoxLayout(root)
+        rv.setContentsMargins(12, 10, 12, 12)
+        rv.setSpacing(10)
+        rv.addWidget(self._build_header())
+        rv.addWidget(self._build_toolbar())
 
         env = self.cmp.runs[0].env
-        size, A = env.engine.params.spacecraft.size, env.engine.rw.A
         views = QWidget()
         hv = QHBoxLayout(views)
         hv.setContentsMargins(0, 0, 0, 0)
+        hv.setSpacing(10)
         self.views = []
         for r in self.cmp.runs:
-            box = QGroupBox(f"{r.name}  —  {'agente ' + model_path if r.name == 'PPO' else 'controllore PD'}")
-            c = COLORS[r.name]
-            box.setStyleSheet(f"QGroupBox {{ color: rgb{c}; font-weight: bold; }}")
-            v = AttitudeView(size, A)
-            QVBoxLayout(box).addWidget(v)
-            hv.addWidget(box)
+            c = card()
+            cv = QVBoxLayout(c)
+            cv.setContentsMargins(10, 8, 10, 10)
+            head = QHBoxLayout()
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color: {COLORS[r.name]}; font-size: 12pt;")
+            name = QLabel(r.name)
+            name.setStyleSheet("font-weight: 700; font-size: 11pt;")
+            sub = QLabel(f"agente  {model_path}" if r.name == "PPO" else "controllore PD sui quaternioni")
+            sub.setObjectName("muted")
+            for w in (dot, name, sub):
+                head.addWidget(w)
+            head.addStretch()
+            cv.addLayout(head)
+            v = AttitudeView(env.engine.params.spacecraft.size, env.engine.rw.A)
+            cv.addWidget(v, stretch=1)
+            hv.addWidget(c)
             self.views.append(v)
 
-        self.table = QLabel()
-        self.table.setFont(MONO)
-        self.table.setTextFormat(Qt.PlainText)
-        self.table.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        table_box = QGroupBox("Confronto")
-        QVBoxLayout(table_box).addWidget(self.table)
-
-        bottom = QWidget()
-        hb = QHBoxLayout(bottom)
-        hb.setContentsMargins(0, 0, 0, 0)
-        hb.addWidget(self._build_controls(), stretch=1)
-        hb.addWidget(table_box, stretch=2)
+        metrics = QWidget()
+        mg = QGridLayout(metrics)
+        mg.setContentsMargins(0, 0, 0, 0)
+        mg.setSpacing(10)
+        self.cards = {
+            "err": MetricCard("Errore d'assetto", "°", "low", ".4f"),
+            "w": MetricCard("Velocità angolare |ω|", "°/s", "low", ".4f"),
+            "alpha": MetricCard("|α| massima", "°/s²", "low", ".2f"),
+            "rpm": MetricCard("Max velocità ruote", "RPM", "low", ".0f"),
+            "energy": MetricCard("Energia", "J", "low", ".1f"),
+            "ret": MetricCard("Reward accumulata", "", "high", ".1f"),
+            "t1": MetricCard("Tempo per < 1°", "s", "low", ".2f"),
+            "t001": MetricCard("Tempo per < 0.01°", "s", "low", ".2f"),
+        }
+        for i, c in enumerate(self.cards.values()):
+            mg.addWidget(c, i // 4, i % 4)
 
         left = QSplitter(Qt.Vertical)
         left.addWidget(views)
-        left.addWidget(bottom)
-        left.setSizes([640, 340])
+        left.addWidget(metrics)
+        left.setSizes([620, 220])
+        left.setChildrenCollapsible(False)
 
+        plots_card = card()
+        pv = QVBoxLayout(plots_card)
+        pv.setContentsMargins(6, 6, 6, 6)
         self.plots = ComparePlots(env.reward_config["alpha_max_deg"], env.engine.rw.p.max_rpm)
+        pv.addWidget(self.plots)
+
         split = QSplitter(Qt.Horizontal)
         split.addWidget(left)
-        split.addWidget(self.plots)
-        split.setSizes([1100, 660])
-        self.setCentralWidget(split)
+        split.addWidget(plots_card)
+        split.setSizes([1080, 660])
+        split.setChildrenCollapsible(False)
+        rv.addWidget(split, stretch=1)
+        self.setCentralWidget(root)
 
         QShortcut(QKeySequence(Qt.Key_Space), self, activated=self.toggle_pause)
         self.clock = QElapsedTimer()
@@ -135,42 +220,110 @@ class CompareWindow(QMainWindow):
         self.timer.start(FRAME_MS)
         self._refresh()
 
-    # ----------------------------------------------------------- controlli
-    def _build_controls(self) -> QWidget:
-        box = QGroupBox("Comandi")
-        g = QGridLayout(box)
+    # --------------------------------------------------------- intestazione
+    def _build_header(self) -> QWidget:
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(4, 0, 4, 0)
+        h.setSpacing(12)
+        ic = QLabel()
+        ic.setPixmap(theme.icon("mdi6.satellite-variant", theme.ACCENT).pixmap(26, 26))
+        title = QLabel("Confronto PPO vs PD")
+        title.setObjectName("h1")
+        self.lbl_info = QLabel()
+        self.lbl_info.setObjectName("muted")
+        self.chip = QLabel()
+        self.chip.setObjectName("chip")
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1000)
+        self.progress.setFixedWidth(260)
+        self.progress.setTextVisible(False)
+        self.lbl_time = QLabel()
+        self.lbl_time.setObjectName("muted")
+        for x in (ic, title, self.lbl_info):
+            h.addWidget(x)
+        h.addStretch()
+        for x in (self.lbl_time, self.progress, self.chip):
+            h.addWidget(x)
+        return w
 
-        g.addWidget(QLabel("Seed:"), 0, 0)
+    # ----------------------------------------------------- barra comandi
+    def _build_toolbar(self) -> QWidget:
+        bar = card()
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(12, 8, 12, 8)
+        h.setSpacing(8)
+
+        def button(text, icon_name, slot, variant=None, icon_color=theme.TEXT):
+            b = QPushButton(text)
+            b.setIcon(theme.icon(icon_name, icon_color))
+            b.setIconSize(QSize(16, 16))
+            b.setCursor(Qt.PointingHandCursor)
+            if variant:
+                b.setProperty("variant", variant)
+            b.clicked.connect(slot)
+            return b
+
+        def sep():
+            s = QFrame()
+            s.setFixedWidth(1)
+            s.setStyleSheet(f"background: {theme.BORDER};")
+            s.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+            return s
+
+        lab = QLabel("Seed")
+        lab.setObjectName("muted")
         self.spin_seed = QSpinBox()
         self.spin_seed.setRange(0, SEED_MAX)
         self.spin_seed.setValue(self.cmp.seed)
-        g.addWidget(self.spin_seed, 0, 1)
-        btn_start = QPushButton("▶ Avvia con questo seed")
-        btn_start.clicked.connect(lambda: self._start(self.spin_seed.value()))
-        g.addWidget(btn_start, 1, 0, 1, 2)
-        btn_rand = QPushButton("🎲 Seed casuale")
-        btn_rand.clicked.connect(self._random_seed)
-        g.addWidget(btn_rand, 2, 0, 1, 2)
+        self.spin_seed.setFixedWidth(120)
+        self.spin_seed.setButtonSymbols(QSpinBox.NoButtons)
+        h.addWidget(lab)
+        h.addWidget(self.spin_seed)
+        h.addWidget(button("Avvia", "mdi6.play", lambda: self._start(self.spin_seed.value()),
+                           "accent", "white"))
+        h.addWidget(button("Casuale", "mdi6.dice-5", self._random_seed))
+        h.addWidget(sep())
 
-        self.btn_pause = QPushButton("⏸ Pausa  [Spazio]")
-        self.btn_pause.clicked.connect(self.toggle_pause)
-        g.addWidget(self.btn_pause, 3, 0, 1, 2)
-        btn_imp = QPushButton(f"⚡ Impulso {IMPULSE_TORQUE * 1e3:g} mN·m × {IMPULSE_DURATION:g} s (su entrambi)")
-        btn_imp.clicked.connect(lambda: self.cmp.apply_impulse(self.rng))
-        g.addWidget(btn_imp, 4, 0, 1, 2)
+        self.btn_pause = button("Pausa", "mdi6.pause", self.toggle_pause)
+        self.btn_pause.setToolTip("Pausa / riprendi  [Spazio]")
+        h.addWidget(self.btn_pause)
+        h.addWidget(sep())
 
-        g.addWidget(QLabel("Velocità:"), 5, 0)
-        self.cmb_speed = QComboBox()
-        speeds = [0.25, 0.5, 1, 2, 5, 10]
-        for s in speeds:
-            self.cmb_speed.addItem(f"{s}×", s)
-        self.cmb_speed.setCurrentIndex(speeds.index(self.speed) if self.speed in speeds else 2)
-        self.cmb_speed.currentIndexChanged.connect(
-            lambda _: setattr(self, "speed", self.cmb_speed.currentData()))
-        g.addWidget(self.cmb_speed, 5, 1)
-        g.setRowStretch(6, 1)
-        return box
+        sp = QLabel("Velocità")
+        sp.setObjectName("muted")
+        h.addWidget(sp)
+        seg = QHBoxLayout()
+        seg.setSpacing(0)
+        self.speed_group = QButtonGroup(self)
+        for i, s in enumerate(SPEEDS):
+            b = QPushButton(f"{s:g}×")
+            b.setCheckable(True)
+            b.setChecked(s == self.speed)
+            b.setCursor(Qt.PointingHandCursor)
+            radius = ("border-top-left-radius: 8px; border-bottom-left-radius: 8px;" if i == 0 else
+                      "border-top-right-radius: 8px; border-bottom-right-radius: 8px;"
+                      if i == len(SPEEDS) - 1 else "")
+            b.setStyleSheet(f"QPushButton {{ border-radius: 0; padding: 6px 10px; {radius} }}")
+            b.clicked.connect(lambda _, v=s: setattr(self, "speed", v))
+            self.speed_group.addButton(b)
+            seg.addWidget(b)
+        h.addLayout(seg)
+        h.addWidget(sep())
 
+        imp = button(f"Impulso {IMPULSE_TORQUE * 1e3:g} mN·m × {IMPULSE_DURATION:g} s",
+                     "mdi6.flash", lambda: self.cmp.apply_impulse(self.rng), "warning", theme.WARNING)
+        imp.setToolTip("Stessa coppia esterna, direzione casuale, su entrambi i satelliti")
+        h.addWidget(imp)
+        h.addStretch()
+
+        legend = QLabel(f"<span style='color:{theme.PPO_COLOR}'>━━</span> PPO &nbsp;&nbsp;"
+                        f"<span style='color:{theme.PD_COLOR}'>━━</span> PD")
+        legend.setObjectName("muted")
+        h.addWidget(legend)
+        return bar
+
+    # --------------------------------------------------------- azioni
     def _start(self, seed: int):
         self.cmp.reset(seed)
         self.spin_seed.setValue(seed)
@@ -184,7 +337,8 @@ class CompareWindow(QMainWindow):
 
     def toggle_pause(self):
         self.paused = not self.paused
-        self.btn_pause.setText("▶ Riprendi  [Spazio]" if self.paused else "⏸ Pausa  [Spazio]")
+        self.btn_pause.setText("Riprendi" if self.paused else "Pausa")
+        self.btn_pause.setIcon(theme.icon("mdi6.play" if self.paused else "mdi6.pause"))
 
     # ------------------------------------------------------------- loop
     def _tick(self):
@@ -201,40 +355,33 @@ class CompareWindow(QMainWindow):
 
     def _refresh(self):
         c = self.cmp
+        ppo, pd = c.runs
         for v, r in zip(self.views, c.runs):
-            tel = r.tel
-            v.update_state(tel.q, r.env.engine.env.sun_inertial, tel.r_inertial, tel.eclipse)
+            v.update_state(r.tel.q, r.env.engine.env.sun_inertial, r.tel.r_inertial, r.tel.eclipse)
         self.plots.update_curves(c.runs)
-        self.table.setText(self._table_text())
-        state = "EPISODIO CONCLUSO" if c.done else ("IN PAUSA" if self.paused else "IN ESECUZIONE")
-        self.statusBar().showMessage(
-            f"seed {c.seed}   |   θ0 = {c.theta0:.1f}°, |ω0| = {c.omega0:.2f} °/s   |   "
-            f"t_sim = {c.t:6.2f} / {c.runs[0].env.max_episode_steps * c.dt:.0f} s   |   {state}")
 
-    def _table_text(self) -> str:
-        ppo, pd = self.cmp.runs
-        f_t = lambda x: f"{x:9.2f} s" if x is not None else "        –  "
+        cards = self.cards
+        cards["err"].set_values(ppo.tel.att_err_deg, pd.tel.att_err_deg)
+        cards["w"].set_values(*(np.degrees(np.linalg.norm(r.tel.omega)) for r in c.runs))
+        cards["alpha"].set_values(ppo.alpha_max, pd.alpha_max)
+        cards["rpm"].set_values(*(float(np.abs(r.tel.wheel_rpm).max()) for r in c.runs))
+        cards["energy"].set_values(ppo.tel.energy, pd.tel.energy)
+        cards["ret"].set_values(ppo.ret, pd.ret)
+        cards["t1"].set_values(ppo.t_1deg, pd.t_1deg)
+        cards["t001"].set_values(ppo.t_001deg, pd.t_001deg)
 
-        def row(label, a, b, fmt):
-            return f"{label:<26}{format(a, fmt):>14}{format(b, fmt):>14}"
-
-        lines = [
-            f"seed {self.cmp.seed}:  θ0 = {self.cmp.theta0:.1f}°   |ω0| = {self.cmp.omega0:.2f} °/s",
-            "",
-            f"{'':<26}{'PPO':>14}{'PD':>14}",
-            row("Errore d'assetto [°]", ppo.tel.att_err_deg, pd.tel.att_err_deg, ".4f"),
-            row("|ω| [°/s]", np.degrees(np.linalg.norm(ppo.tel.omega)),
-                np.degrees(np.linalg.norm(pd.tel.omega)), ".4f"),
-            row("|α| max finora [°/s²]", ppo.alpha_max, pd.alpha_max, ".2f"),
-            row("Max |Ω| ruote [RPM]", np.abs(ppo.tel.wheel_rpm).max(),
-                np.abs(pd.tel.wheel_rpm).max(), ".0f"),
-            row("Energia [J]", ppo.tel.energy, pd.tel.energy, ".1f"),
-            row("Reward accumulata", ppo.ret, pd.ret, ".1f"),
-            f"{'Tempo per scendere < 1°':<26}{f_t(ppo.t_1deg):>14}{f_t(pd.t_1deg):>14}",
-            f"{'Tempo per scendere < 0.01°':<26}{f_t(ppo.t_001deg):>14}{f_t(pd.t_001deg):>14}",
-        ]
-        if self.cmp.done:
-            better = "PPO" if ppo.ret > pd.ret else "PD"
-            lines += ["", f"Episodio concluso (100 s): reward migliore → {better} "
-                          f"({max(ppo.ret, pd.ret):.1f} vs {min(ppo.ret, pd.ret):.1f})"]
-        return "\n".join(lines)
+        self.lbl_info.setText(f"seed {c.seed}   ·   θ0 = {c.theta0:.1f}°   ·   |ω0| = {c.omega0:.2f} °/s")
+        self.lbl_time.setText(f"{c.t:6.1f} / {self.episode_s:.0f} s")
+        self.progress.setValue(int(1000 * c.t / self.episode_s))
+        if c.done:
+            winner = "PPO" if ppo.ret > pd.ret else "PD"
+            state, text = "done", f"CONCLUSO · reward migliore: {winner}"
+        elif self.paused:
+            state, text = "pause", "IN PAUSA"
+        else:
+            state, text = "run", "IN ESECUZIONE"
+        if self.chip.property("state") != state:
+            self.chip.setProperty("state", state)
+            self.chip.style().unpolish(self.chip)
+            self.chip.style().polish(self.chip)
+        self.chip.setText(text)

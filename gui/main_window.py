@@ -5,8 +5,8 @@ La GUI non contiene fisica: legge solo la telemetria e invia comandi
 (pausa, coppie manuali, abilitazione disturbi/controllore).
 """
 import numpy as np
-from PySide6.QtCore import QElapsedTimer, Qt, QTimer
-from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
+from PySide6.QtCore import QElapsedTimer, QSize, Qt, QTimer
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QGridLayout, QGroupBox,
                                QHBoxLayout, QLabel, QMainWindow, QPushButton,
                                QScrollArea, QSlider, QSplitter, QVBoxLayout,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QGridLayout, QGroupBox,
 
 from satsim.simulation import ClosedLoopSimulation
 
+from . import theme
 from .dashboard import ModelPanel, TelemetryPanel, TelemetryPlots, format_model_text
 from .view3d import AttitudeView
 
@@ -79,14 +80,21 @@ class MainWindow(QMainWindow):
         box = QGroupBox("Comandi")
         g = QGridLayout(box)
 
-        self.btn_pause = QPushButton("⏸ Pausa  [Spazio]")
-        self.btn_pause.clicked.connect(self.toggle_pause)
-        btn_reset = QPushButton("⟲ Reset (tumbling casuale)")
-        btn_reset.clicked.connect(self._reset)
-        btn_kick = QPushButton("↻ Perturba assetto 45°")
-        btn_kick.clicked.connect(lambda: self.sim.kick_attitude(45.0))
-        btn_imp = QPushButton("⚡ Impulso 5 mN·m × 1 s")
-        btn_imp.clicked.connect(self._impulse)
+        def button(text, icon_name, slot, variant=None, icon_color=theme.TEXT):
+            b = QPushButton(text)
+            b.setIcon(theme.icon(icon_name, icon_color))
+            b.setIconSize(QSize(16, 16))
+            b.setCursor(Qt.PointingHandCursor)
+            if variant:
+                b.setProperty("variant", variant)
+            b.clicked.connect(slot)
+            return b
+
+        self.btn_pause = button("Pausa  [Spazio]", "mdi6.pause", self.toggle_pause, "accent", "white")
+        btn_reset = button("Reset (tumbling casuale)", "mdi6.restore", self._reset)
+        btn_kick = button("Perturba assetto 45°", "mdi6.rotate-3d-variant",
+                          lambda: self.sim.kick_attitude(45.0))
+        btn_imp = button("Impulso 5 mN·m × 1 s", "mdi6.flash", self._impulse, "warning", theme.WARNING)
         g.addWidget(self.btn_pause, 0, 0)
         g.addWidget(btn_reset, 0, 1)
         g.addWidget(btn_kick, 1, 0)
@@ -138,6 +146,7 @@ class MainWindow(QMainWindow):
             self.sliders.append(s)
             self.slider_labels.append(lab)
         btn_zero = QPushButton("Azzera coppie manuali")
+        btn_zero.setIcon(theme.icon("mdi6.restore"))
         btn_zero.clicked.connect(lambda: [s.setValue(0) for s in self.sliders])
         tg.addWidget(btn_zero, 3, 0, 1, 3)
         g.addWidget(tbox, 4, 0, 1, 2)
@@ -161,7 +170,8 @@ class MainWindow(QMainWindow):
 
     def toggle_pause(self):
         self.paused = not self.paused
-        self.btn_pause.setText("▶ Riprendi  [Spazio]" if self.paused else "⏸ Pausa  [Spazio]")
+        self.btn_pause.setText("Riprendi  [Spazio]" if self.paused else "Pausa  [Spazio]")
+        self.btn_pause.setIcon(theme.icon("mdi6.play" if self.paused else "mdi6.pause", "white"))
 
     # ------------------------------------------------------------- loop
     def _tick(self):
@@ -195,18 +205,5 @@ class MainWindow(QMainWindow):
 
 
 def apply_dark_palette(app):
-    app.setStyle("Fusion")
-    pal = QPalette()
-    bg, base, text = QColor(30, 32, 40), QColor(20, 22, 28), QColor(220, 222, 230)
-    pal.setColor(QPalette.Window, bg)
-    pal.setColor(QPalette.WindowText, text)
-    pal.setColor(QPalette.Base, base)
-    pal.setColor(QPalette.AlternateBase, bg)
-    pal.setColor(QPalette.Text, text)
-    pal.setColor(QPalette.Button, QColor(45, 48, 58))
-    pal.setColor(QPalette.ButtonText, text)
-    pal.setColor(QPalette.Highlight, QColor(60, 120, 200))
-    pal.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
-    pal.setColor(QPalette.ToolTipBase, base)
-    pal.setColor(QPalette.ToolTipText, text)
-    app.setPalette(pal)
+    """Compatibilità: il tema è ora definito in gui/theme.py."""
+    theme.apply_theme(app)

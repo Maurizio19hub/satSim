@@ -33,7 +33,7 @@ Richiede Python ≥ 3.10.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install numpy PySide6 pyqtgraph PyOpenGL pytest
+pip install numpy PySide6 pyqtgraph PyOpenGL qtawesome pytest
 # oppure: pip install -r requirements.txt
 
 python main.py                         # 4 ruote in piramide, tempo reale
@@ -93,6 +93,7 @@ satSim/
 ├── gui/                     # ─── VISUALIZZAZIONE ───
 │   ├── view3d.py            # scena OpenGL (pyqtgraph.opengl)
 │   ├── compare_window.py    # finestra di confronto PPO vs PD (--compare)
+│   ├── theme.py             # tema grafico condiviso: colori, foglio di stile Qt, icone
 │   ├── dashboard.py         # grafici, telemetria numerica, pannello del modello
 │   └── main_window.py       # layout, comandi, loop temporale
 ├── rl/                      # ─── REINFORCEMENT LEARNING (PPO, SB3) — vedi rl/README.md ───
@@ -509,3 +510,11 @@ Sono tutti in `satsim/config.py` (dataclass modificabili).
 - Nuovo parametro fisico `ReactionWheelParams.max_torque_rate` (8 mN·m/s): l'engine limita la variazione della coppia di ogni ruota a 0.4 mN·m per passo, per qualunque controllore. Il PD della GUI ora rispetta lo stesso limite dell'agente RL. Effetto sul PD (seed 42): picco di \|α\| da 6.93 a 6.75 °/s²; tempo per scendere sotto 1° ed errore finale invariati.
 - `python main.py --compare`: confronto visivo PPO vs PD sullo stesso seed (`gui/compare_window.py`, logica in `rl/compare.py`).
 - Test: `test_torque_rate_limit` (fisica), `test_comparison_matches_evaluate` (RL).
+
+### 2026-10-01 — Restyling dell'interfaccia
+- Nuovo `gui/theme.py`, condiviso dalle due finestre: tema scuro con pannelli a "card", colore d'accento, font di sistema, foglio di stile Qt (QSS) per pulsanti, campi, checkbox, slider e barre; stile uniforme dei grafici pyqtgraph.
+- Icone vettoriali Material Design con **QtAwesome** al posto delle emoji. La dipendenza è opzionale: senza QtAwesome i pulsanti restano senza icona.
+- Modalità confronto ridisegnata:
+  - intestazione con seed, condizioni iniziali, avanzamento dell'episodio e stato;
+  - barra comandi orizzontale, con la velocità come selettore a pulsanti;
+  - card delle metriche con il valore migliore evidenziato in verde, al posto della tabella di testo.

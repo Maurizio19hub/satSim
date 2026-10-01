@@ -2,6 +2,7 @@ numpy>=1.26
 PySide6>=6.6
 pyqtgraph>=0.13.7
 PyOpenGL>=3.1
+qtawesome>=1.3       # icone vettoriali della GUI (opzionale)
 pytest>=8        # solo per i test
 # --- Reinforcement Learning (rl/) ---
 gymnasium>=0.29
