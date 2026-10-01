@@ -34,7 +34,8 @@ def test_action_is_rate_limited_torque_change():
     assert obs.shape == (6 + n,)
     np.testing.assert_array_equal(obs[6:], 0.0)          # coppia iniziale nulla
 
-    # Azione massima per un passo: la coppia sale di DTAU_MAX_FRAC · T_max
+    # Azione massima per un passo: la coppia sale di Δτ_max = max_torque_rate · Δt
+    np.testing.assert_allclose(env.dtau_max, 0.2 * env.tau_max)
     obs, *_ = env.step(np.ones(n, dtype=np.float32))
     np.testing.assert_allclose(obs[6:], env.dtau_max / env.tau_max, rtol=1e-6)
 
@@ -70,3 +71,17 @@ def test_log_attitude_error():
         assert prev < g <= 1.0                                 # monotona, limitata
         prev = g
     assert np.linalg.norm(log_attitude_error(quat_from_axis_angle(axis, np.radians(0.45)))) > 0.2
+
+
+def test_comparison_matches_evaluate():
+    """La modalità confronto (rl/compare.py) riproduce rl/evaluate.py episodio per episodio."""
+    from stable_baselines3 import PPO
+    from rl.compare import Comparison
+    from rl.evaluate import evaluate
+    c = Comparison("rl/pretrained/ppo_adcs_v8", seed=104)
+    c.advance(10_000)
+    assert c.done and abs(c.t - 100.0) < 1e-9
+    ref_ppo = evaluate(c.runs[0].policy, seeds=[104])["ret"][0]
+    ref_pd = evaluate("PD", seeds=[104])["ret"][0]
+    assert abs(c.runs[0].ret - ref_ppo) < 1e-6
+    assert abs(c.runs[1].ret - ref_pd) < 1e-6

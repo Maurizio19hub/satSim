@@ -30,6 +30,10 @@ class ReactionWheelParams:
     inertia: float = 1.5e-5             # I_rw, inerzia assiale del rotore [kg·m²]
     max_rpm: float = 6000.0             # saturazione in velocità [RPM]
     max_torque: float = 2.0e-3          # coppia massima del motore [N·m]
+    # Massima velocità di variazione della coppia comandata (driver del motore):
+    # 8e-3 N·m/s → da 0 a T_max in 0.25 s. Evita salti bruschi di coppia
+    # (vibrazioni, picchi di corrente, usura). float("inf") = nessun limite.
+    max_torque_rate: float = 8.0e-3     # [N·m/s]
     # Modello di potenza: P = k1*|T| + k2*|T*Omega| + P_static  (per ruota)
     k1: float = 50.0                    # [W/(N·m)]  perdite resistive ~ corrente ∝ coppia
     k2: float = 1.2                     # [-]        inverso efficienza meccanica

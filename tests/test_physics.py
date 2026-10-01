@@ -107,3 +107,19 @@ def test_pd_controller_converges():
         tel = e.step(e.allocate(c.compute(e.q, e.omega, e.h_rw, e.q_target)))
     assert tel.att_err_deg < 0.1
     assert np.linalg.norm(tel.omega) < 1e-3
+
+
+def test_torque_rate_limit():
+    """La coppia applicata non può variare più di max_torque_rate·dt per passo."""
+    e = make_engine()
+    d_max = e.params.wheels.max_torque_rate * e.dt
+    tau_max = e.params.wheels.max_torque
+    prev = np.zeros(4)
+    for k in range(30):
+        cmd = np.full(4, tau_max if k < 15 else -tau_max)    # gradino +T_max, poi −T_max
+        tel = e.step(cmd)
+        assert np.all(np.abs(tel.wheel_torque - prev) <= d_max + 1e-15)
+        prev = tel.wheel_torque
+    np.testing.assert_allclose(tel.wheel_torque, -tau_max)   # dopo 15 passi arriva a −T_max
+    e.reset()
+    np.testing.assert_array_equal(e.tau_cmd, 0.0)             # il reset azzera la coppia

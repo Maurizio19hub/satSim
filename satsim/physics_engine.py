@@ -13,7 +13,8 @@ Vettore di stato (dimensione 7 + N + 1):
 Equazioni implementate (vedi README.md per la derivazione):
 
     [1] J  (tensore d'inerzia 3x3 del CubeSat 3U)
-    [2] dΩ/dt = T_rw / I_rw                     (+ saturazione a ±Ω_max)
+    [2] dΩ/dt = T_rw / I_rw                     (+ saturazione a ±Ω_max,
+                                                 rate limit sulla coppia)
         P     = k1|T_rw| + k2|T_rw·Ω| + P_static
     [3] J dω/dt = T_tot − ω × (J ω + h_rw),   h_rw = A · I_rw · Ω
     [4] dq/dt = ½ q ⊗ [0, ω]                    (+ normalizzazione ad ogni passo)
@@ -69,6 +70,7 @@ class ReactionWheelArray:
         self.I_rw = p.inertia
         self.omega_max = p.max_rpm * RPM_TO_RADS
         self.tau_max = p.max_torque
+        self.tau_rate_max = p.max_torque_rate
 
     @staticmethod
     def _spin_axes(config: str, beta: float) -> np.ndarray:
@@ -80,6 +82,18 @@ class ReactionWheelArray:
             return np.array([[np.sin(beta) * np.cos(f), np.sin(beta) * np.sin(f), np.cos(beta)]
                              for f in phis]).T
         raise ValueError(f"Configurazione ruote sconosciuta: {config}")
+
+    def rate_limit(self, tau_prev: np.ndarray, tau_cmd: np.ndarray, dt: float) -> np.ndarray:
+        """Limita la variazione della coppia comandata rispetto al passo precedente.
+
+            |T(t+dt) − T(t)| ≤ dT_max = max_torque_rate · dt     (per ruota)
+
+        Modella il driver del motore, che non può cambiare la corrente (∝ coppia)
+        istantaneamente. Il comando è prima limitato a ±T_max.
+        """
+        tau = np.clip(tau_cmd, -self.tau_max, self.tau_max)
+        d_max = self.tau_rate_max * dt
+        return tau_prev + np.clip(tau - tau_prev, -d_max, d_max)
 
     def limit_torque(self, tau_cmd: np.ndarray, omega_w: np.ndarray, dt: float) -> np.ndarray:
         """Applica i limiti fisici al comando di coppia motore.
@@ -162,6 +176,7 @@ class SatelliteEngine:
         x[4:7] = omega0 if omega0 is not None else 0.0
         x[7:7 + self.rw.n] = wheel_speed0 if wheel_speed0 is not None else 0.0
         self.x = x
+        self.tau_cmd = np.zeros(self.rw.n)     # ultima coppia comandata (per il rate limit)
         zeros = np.zeros(self.rw.n)
         return self._telemetry(zeros, zeros, np.zeros(3))
 
@@ -231,11 +246,16 @@ class SatelliteEngine:
 
         tau_wheel_cmd : coppie motore richieste alle N ruote [N·m]
         T_manual      : coppia di disturbo esterna aggiuntiva (body) [N·m]
+
+        La coppia richiesta passa per tre limiti, nell'ordine:
+        |T| ≤ T_max, variazione ≤ max_torque_rate·dt rispetto al passo
+        precedente, saturazione in velocità delle ruote.
         """
         n = self.rw.n
         tau_cmd = np.zeros(n) if tau_wheel_cmd is None else np.asarray(tau_wheel_cmd, float)
         T_manual = np.zeros(3) if T_manual is None else np.asarray(T_manual, float)
-        tau = self.rw.limit_torque(tau_cmd, self.x[7:7 + n], self.dt)
+        self.tau_cmd = self.rw.rate_limit(self.tau_cmd, tau_cmd, self.dt)
+        tau = self.rw.limit_torque(self.tau_cmd, self.x[7:7 + n], self.dt)
 
         dt, t, x = self.dt, self.t, self.x
         k1, _ = self._derivatives(t, x, tau, T_manual)

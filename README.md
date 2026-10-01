@@ -39,6 +39,7 @@ pip install numpy PySide6 pyqtgraph PyOpenGL pytest
 python main.py                         # 4 ruote in piramide, tempo reale
 python main.py --wheels 3 --speed 5    # 3 ruote ortogonali, 5× tempo reale
 python main.py --dt 0.02 --seed 42     # passo diverso, condizioni iniziali riproducibili
+python main.py --compare --seed 101    # confronto PPO (sinistra) vs PD (destra), vedi sotto
 
 python -m pytest -q                    # test di verifica della fisica
 ```
@@ -57,6 +58,24 @@ python -m pytest -q                    # test di verifica della fisica
 - Con il PD attivo, porta lo slider `T_z` a +2 mN·m: le ruote accumulano momento angolare finché saturano (barre rosse) e da quel momento il satellite perde il controllo. È il motivo per cui i satelliti reali fanno il *momentum dumping*.
 - Disattiva il PD durante un tumbling: il moto diventa quello libero di Eulero-Poinsot.
 
+### Modalità confronto PPO vs PD
+
+```bash
+python main.py --compare                 # seed 0, modello rl/pretrained/ppo_adcs_v8
+python main.py --compare --seed 101 --model models/ppo_adcs_best
+```
+
+Richiede anche `gymnasium` e `stable-baselines3`; la GUI normale no. Due satelliti partono dalla **stessa condizione iniziale** (stesso seed, stessa estrazione di `ClosedLoopSimulation.reset` e dell'ambiente RL) e avanzano insieme, con gli stessi disturbi e lo stesso limite sulla coppia.
+
+| Area | Contenuto |
+|---|---|
+| **Viste 3D** | Sinistra: agente PPO. Destra: PD. |
+| **Comandi** | Campo seed + Avvia, seed casuale, pausa (`Spazio`), velocità (0.25×…10×), impulso di 5 mN·m per 1 s con la stessa direzione su entrambi. |
+| **Confronto** | Tabella PPO / PD: errore, \|ω\|, \|α\| max, max \|Ω\| ruote, energia, reward accumulata, tempi per scendere sotto 1° e 0.01°. A 100 s l'episodio si chiude con il riepilogo. |
+| **Grafici** | Curve sovrapposte (PPO blu, PD arancione): errore in scala log (soglie 1° e 0.01°), \|ω\|, max\|α_i\| (soglia 2 °/s²), max \|Ω\| ruote (limite 6000 RPM), potenza. |
+
+I numeri coincidono con `python -m rl.evaluate` sullo stesso seed (verificato da `tests/test_rl_env.py::test_comparison_matches_evaluate`).
+
 ---
 
 ## 2. Architettura del software
@@ -73,11 +92,15 @@ satSim/
 │   └── simulation.py        # anello chiuso + coppie manuali + storico
 ├── gui/                     # ─── VISUALIZZAZIONE ───
 │   ├── view3d.py            # scena OpenGL (pyqtgraph.opengl)
+│   ├── compare_window.py    # finestra di confronto PPO vs PD (--compare)
 │   ├── dashboard.py         # grafici, telemetria numerica, pannello del modello
 │   └── main_window.py       # layout, comandi, loop temporale
 ├── rl/                      # ─── REINFORCEMENT LEARNING (PPO, SB3) — vedi rl/README.md ───
 │   ├── adcs_env.py          # ambiente Gymnasium (solo fisica, niente GUI)
-│   └── train.py             # addestramento PPO headless: python -m rl.train
+│   ├── train.py             # addestramento PPO headless: python -m rl.train
+│   ├── evaluate.py          # confronto numerico di un modello con il PD
+│   ├── compare.py           # logica del confronto PPO vs PD passo-passo (senza Qt)
+│   └── pretrained/          # modelli addestrati (ppo_adcs_v8.zip)
 └── tests/
     ├── test_physics.py      # verifica: conservazione e soluzioni analitiche
     └── test_rl_env.py       # ambiente RL e training senza GUI
@@ -220,7 +243,8 @@ $A^{+}$ è la pseudo-inversa di Moore-Penrose. Con 4 ruote fornisce la soluzione
 ### 6.4 Saturazioni
 
 1. **Coppia:** $|T_{rw,i}|\le T_{max}$ (2 mN·m).
-2. **Velocità:** $|\Omega_i|\le\Omega_{max}$ (6000 RPM ≈ 628 rad/s).
+2. **Variazione della coppia (rate limit):** $|T_{rw,i}(t+\Delta t)-T_{rw,i}(t)|\le \dot T_{max}\,\Delta t$, con $\dot T_{max}$ = `max_torque_rate` = 8 mN·m/s. Da 0 a $T_{max}$ servono 0.25 s, da $-T_{max}$ a $+T_{max}$ 0.5 s. Modella il driver del motore, che non può cambiare la corrente (∝ coppia) istantaneamente: un salto brusco di coppia causerebbe vibrazioni, picchi di corrente e usura. Il limite è applicato dall'engine (`ReactionWheelArray.rate_limit`) a qualunque controllore, PD o agente RL.
+3. **Velocità:** $|\Omega_i|\le\Omega_{max}$ (6000 RPM ≈ 628 rad/s).
 
 La coppia è costante durante il passo $\Delta t$ (vedi §10), quindi l'equazione 2 si integra in modo **esatto**: $\Omega_i(t+\Delta t)=\Omega_i+T_{rw,i}\Delta t/I_{rw}$. Prima dell'integrazione il comando viene limitato a
 
@@ -393,7 +417,7 @@ $$
 
 - Il primo termine è un PD **normalizzato con l'inerzia**. Per piccoli angoli $\mathbf q_{e,vec}\approx\boldsymbol\theta/2$ e ogni asse diventa un oscillatore del secondo ordine $\ddot\theta+K_d\dot\theta+\tfrac{K_p}{2}\theta=0$. Si sceglie quindi $K_p=2\omega_n^2$ e $K_d=2\zeta\omega_n$ (default $\omega_n=0.4$ rad/s, $\zeta=0.9$).
 - Il secondo termine **compensa l'accoppiamento giroscopico**, rendendo la dinamica ad anello chiuso quasi lineare.
-- $\mathbf T_{cmd}$ viene poi allocato sulle ruote (§6.3) e limitato dalle saturazioni (§6.4).
+- $\mathbf T_{cmd}$ viene poi allocato sulle ruote (§6.3) e limitato dalle saturazioni (§6.4), compreso il limite sulla variazione della coppia: il PD non può più far saltare la coppia da un passo all'altro.
 
 **Stabilità.** Senza disturbi e senza saturazioni, la compensazione giroscopica cancella il termine non lineare e resta $\dot{\boldsymbol\omega} = -K_p\mathbf q_{e,vec} - K_d\boldsymbol\omega$. Si usa come funzione di Lyapunov
 
@@ -413,7 +437,7 @@ Per il principio di invarianza di LaSalle il sistema converge a $\boldsymbol\ome
 
 ## 12. Verifica e validazione
 
-`tests/test_physics.py` contiene 8 test (`python -m pytest -q`):
+`tests/test_physics.py` contiene 9 test (`python -m pytest -q`):
 
 | Test | Proprietà fisica verificata |
 |---|---|
@@ -425,6 +449,7 @@ Per il principio di invarianza di LaSalle il sistema converge a $\boldsymbol\ome
 | `test_quaternion_kinematics_analytic` | Rotazione uniforme attorno a un asse principale: coincide con la soluzione analitica $\mathbf q(t)=[\cos\tfrac{\omega t}{2},0,0,\sin\tfrac{\omega t}{2}]$. |
 | `test_gravity_gradient_zero_on_principal_axis` | $\mathbf T_{gg}=0$ quando il nadir è allineato con un asse principale. |
 | `test_pd_controller_converges` | Da 90° e in presenza di disturbi: errore < 0.1° dopo 80 s. |
+| `test_torque_rate_limit` | Con un comando a gradino (+T_max poi −T_max) la coppia applicata varia al massimo di $\dot T_{max}\Delta t$ per passo; il reset azzera la coppia. |
 
 La conservazione di $\mathbf H$ è il test più importante. Verifica insieme la coerenza dei segni tra l'equazione 2 (ruote), l'equazione 3 (Eulero) e l'allocazione. Un errore di segno sulla reazione $-A\mathbf T_{rw}$ farebbe crescere H in modo sistematico.
 
@@ -479,3 +504,8 @@ Sono tutti in `satsim/config.py` (dataclass modificabili).
 - GUI in PySide6 + pyqtgraph.opengl: vista 3D (satellite, terne inerziale e body, assi delle ruote, Sole, nadir), grafici in tempo reale, telemetria con barre di saturazione, pannello del modello matematico con i valori live, coppie di disturbo manuali, pausa e velocità variabile.
 - 8 test di verifica fisica: conservazione di H e dell'energia, soluzioni analitiche, saturazione, convergenza del PD.
 - Ottimizzazione: prodotto vettoriale scritto a mano (da ~4 a ~1.5 ms per passo).
+
+### 2026-10-01 — Limite sulla variazione della coppia e modalità confronto
+- Nuovo parametro fisico `ReactionWheelParams.max_torque_rate` (8 mN·m/s): l'engine limita la variazione della coppia di ogni ruota a 0.4 mN·m per passo, per qualunque controllore. Il PD della GUI ora rispetta lo stesso limite dell'agente RL. Effetto sul PD (seed 42): picco di \|α\| da 6.93 a 6.75 °/s²; tempo per scendere sotto 1° ed errore finale invariati.
+- `python main.py --compare`: confronto visivo PPO vs PD sullo stesso seed (`gui/compare_window.py`, logica in `rl/compare.py`).
+- Test: `test_torque_rate_limit` (fisica), `test_comparison_matches_evaluate` (RL).

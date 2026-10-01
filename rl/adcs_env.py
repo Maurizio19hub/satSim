@@ -32,10 +32,6 @@ OMEGA_SCALE = 0.1           # [rad/s]
 # 0.01° → 0.013, 0.1° → 0.092, 0.45° → 0.23, 10° → 0.62, 60° → 0.85, 180° → 1.
 LOG_THETA0 = np.radians(0.1)    # [rad]
 
-# Massima variazione di coppia per passo, come frazione di T_max.
-# Con 0.2 e Δt = 0.05 s la coppia va da 0 a T_max in 5 passi (0.25 s).
-DTAU_MAX_FRAC = 0.2
-
 # Pesi e soglie della reward (vedi rl/README.md §5).
 REWARD_CONFIG = dict(
     k_err=0.01,             # penalità per grado di errore d'assetto, per passo
@@ -71,21 +67,24 @@ class SatAttitudeEnv(gym.Env):
 
     Osservazione (6 + N): [ e_log (3) | ω / OMEGA_SCALE (3) | τ / T_max (N) ]
     Azione (N):           Δτ normalizzata in [-1, 1],
-                          τ ← clip(τ + action · DTAU_MAX_FRAC · T_max, ±T_max)
+                          τ ← clip(τ + action · Δτ_max, ±T_max)
+                          con Δτ_max = max_torque_rate · Δt (limite del motore,
+                          satsim/config.py: 0.2 · T_max per passo di 0.05 s)
     """
 
     metadata = {"render_modes": []}
 
     def __init__(self, params: SimParams | None = None, max_episode_steps: int = 2000,
-                 render_mode: str | None = None, reward_config: dict | None = None,
-                 dtau_max_frac: float = DTAU_MAX_FRAC):
+                 render_mode: str | None = None, reward_config: dict | None = None):
         """Inizializzazione: engine fisico, spazi di azione e osservazione, parametri."""
         super().__init__()
         self.engine = SatelliteEngine(params)
         self.dt = self.engine.dt
         self.n_wheels = self.engine.rw.n
         self.tau_max = self.engine.rw.tau_max
-        self.dtau_max = dtau_max_frac * self.tau_max
+        # Massima variazione di coppia per passo: la stessa che il motore
+        # applica a qualunque controllore (engine.rw.rate_limit).
+        self.dtau_max = self.engine.rw.tau_rate_max * self.dt
         self.max_episode_steps = max_episode_steps
         self.render_mode = render_mode
         self.reward_config = {**REWARD_CONFIG, **(reward_config or {})}
@@ -96,6 +95,7 @@ class SatAttitudeEnv(gym.Env):
 
         self._steps = 0
         self._tau = np.zeros(self.n_wheels)     # coppia motore corrente [N·m]
+        self.T_external = np.zeros(3)           # coppia esterna di prova (body) [N·m], 0 nel training
         self._prev_omega = np.zeros(3)          # ω al passo precedente (per l'accelerazione)
         self._alpha = np.zeros(3)               # accelerazione angolare dell'ultimo passo [rad/s²]
 
@@ -111,6 +111,7 @@ class SatAttitudeEnv(gym.Env):
         q0 = quat_from_axis_angle(axis, np.radians(rng.uniform(40.0, 80.0)))
         omega0 = rng.uniform(-0.05, 0.05, 3)
         tel = self.engine.reset(q0=q0, omega0=omega0)
+        self.last_tel = tel                     # ultima telemetria completa (per GUI e analisi)
 
         self._steps = 0
         self._tau = np.zeros(self.n_wheels)
@@ -125,7 +126,8 @@ class SatAttitudeEnv(gym.Env):
         """
         dtau = np.clip(action, -1.0, 1.0) * self.dtau_max
         self._tau = np.clip(self._tau + dtau, -self.tau_max, self.tau_max)
-        tel = self.engine.step(self._tau)
+        tel = self.engine.step(self._tau, self.T_external)
+        self.last_tel = tel
         self._steps += 1
 
         # Accelerazione angolare dalla variazione di velocità tra due passi

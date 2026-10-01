@@ -34,6 +34,7 @@ rl/
 ├── adcs_env.py     # ambiente Gymnasium SatAttitudeEnv (solo fisica, niente SB3 né GUI)
 ├── train.py        # addestramento PPO con Stable-Baselines3 (headless)
 ├── evaluate.py     # confronto di un modello con PD e riferimenti sui seed di test
+├── compare.py      # confronto passo-passo PPO vs PD per la GUI (python main.py --compare)
 ├── pretrained/
 │   └── ppo_adcs_v8.zip   # modello v8 migliore (1.7 M passi), criteri di successo raggiunti
 └── README.md       # questo documento
@@ -50,7 +51,7 @@ Le dipendenze vanno in un solo verso: `rl → satsim`. L'engine non importa null
 | Elemento | Scelta | Stato |
 |---|---|---|
 | **Passo di controllo** | Un passo dell'engine, Δt = `params.dt` (0.05 s). Azione mantenuta costante sul passo (zero-order hold). | deciso |
-| **Azione** | `Box([-1, 1]^N)`: **variazione** della coppia motore di ogni ruota. `τ ← clip(τ + action · Δτ_max, ±T_max)` con `Δτ_max = DTAU_MAX_FRAC · T_max`. I limiti fisici (coppia e saturazione in velocità) restano applicati dall'engine. | v3 |
+| **Azione** | `Box([-1, 1]^N)`: **variazione** della coppia motore di ogni ruota. `τ ← clip(τ + action · Δτ_max, ±T_max)` con `Δτ_max = max_torque_rate · Δt` (parametro fisico in `satsim/config.py`, = 0.2 · T_max). I limiti fisici (coppia e saturazione in velocità) restano applicati dall'engine. | v3 |
 | **Osservazione** | `Box(6 + N)`: `[e_log (3) , ω / OMEGA_SCALE (3) , τ / T_max (N)]`, cioè errore d'assetto in scala logaritmica, velocità angolare e coppia motore corrente. `OMEGA_SCALE = 0.1 rad/s`. | v5 |
 | **Stato iniziale** | Assetto casuale a 40–80° dal target (asse casuale), `ω` uniforme in ±0.05 rad/s, ruote ferme, coppia nulla. Campionato con `self.np_random`. | v3 |
 | **Terminazione** | Nessuna: `terminated` è sempre `False`. | v1 |
@@ -83,7 +84,7 @@ $$
 \tau_t = \mathrm{clip}\left(\tau_{t-1} + a_t\,\Delta\tau_{max},\ -T_{max},\ T_{max}\right), \qquad \Delta\tau_{max} = \texttt{DTAU\_MAX\_FRAC}\cdot T_{max}
 $$
 
-- Con `DTAU_MAX_FRAC = 0.2` e Δt = 0.05 s la coppia va da 0 a T_max in 5 passi (0.25 s) e da −T_max a +T_max in 10 passi (0.5 s).
+- Con `max_torque_rate = 8 mN·m/s` e Δt = 0.05 s, Δτ_max = 0.4 mN·m = 0.2 · T_max: la coppia va da 0 a T_max in 5 passi (0.25 s) e da −T_max a +T_max in 10 passi (0.5 s). Dal 2026-10-01 lo stesso limite è applicato dall'engine a qualunque controllore, compreso il PD.
 - Motivo: con la coppia assoluta l'agente poteva commutare da +T_max a −T_max in un solo passo (*chattering*), con vibrazioni, picchi di corrente e usura dei motori. Ora la variazione è limitata per costruzione.
 - Il comando `τ` è quello richiesto all'engine. L'engine può applicarne meno se la ruota è vicina alla saturazione in velocità.
 - `action = 0` significa "mantieni la coppia attuale", non "coppia nulla".
@@ -98,7 +99,7 @@ $$
 
 | Metodo | Compito |
 |---|---|
-| `__init__(params, max_episode_steps, render_mode, reward_config, dtau_max_frac)` | Crea `SatelliteEngine`, definisce `action_space` e `observation_space`, legge i pesi della reward (`REWARD_CONFIG`, sovrascrivibili) e il limite di variazione della coppia. |
+| `__init__(params, max_episode_steps, render_mode, reward_config)` | Crea `SatelliteEngine`, definisce `action_space` e `observation_space`, legge i pesi della reward (`REWARD_CONFIG`, sovrascrivibili) e il limite di variazione della coppia. |
 | `reset(seed, options)` | Campiona le condizioni iniziali, resetta l'engine, azzera la coppia, salva `ω` iniziale come "passo precedente". Ritorna `(obs, info)`. |
 | `step(action)` | Aggiorna la coppia `τ ← clip(τ + action · Δτ_max)`, chiama `engine.step(τ)`, calcola l'accelerazione `α = (ω − ω_prev)/Δt`, la reward, aggiorna i valori precedenti. Ritorna `(obs, reward, terminated, truncated, info)`. |
 | `_compute_reward(tel, action)` | Reward del passo (§5). |
@@ -258,7 +259,7 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 
 ## 8. Decisioni aperte
 
-- Valore di `DTAU_MAX_FRAC` (§3).
+- Valore di `max_torque_rate` (§3).
 - Taratura di `k_err` e `k_accel`.
 - Aggiunta delle velocità delle ruote all'osservazione.
 - Condizioni di terminazione anticipata.
@@ -489,3 +490,12 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 - Il modello finale (2 M) è molto peggiore del migliore: su un seed si ferma a 1.39°. Conferma che il salvataggio del modello migliore è indispensabile.
 - Restano peggiori del PD accelerazioni (14.1 vs 6.2 °/s²) ed energia (69.1 vs 61.3 J).
 - Il modello migliore v8 è pubblicato in `rl/pretrained/ppo_adcs_v8.zip` (156 KB), come eccezione alla regola di non versionare i modelli (`models/` resta in `.gitignore`). Per verificarlo: `python -m rl.evaluate rl/pretrained/ppo_adcs_v8`. È valido solo con il codice v8: osservazione 10 valori, azione come variazione di coppia.
+
+### 2026-10-01 — Limite di coppia nell'engine e modalità confronto
+- Il limite sulla variazione della coppia passa dall'ambiente all'engine (`max_torque_rate` in `satsim/config.py`): stesso valore (0.2 · T_max per passo), ora applicato anche al PD della GUI. `DTAU_MAX_FRAC` rimosso. Risultati del modello v8 invariati (`rl.evaluate`: −27.8 vs −42.9).
+- `SatAttitudeEnv` espone `last_tel` (telemetria dell'ultimo passo) e `T_external` (coppia esterna di prova, 0 nel training).
+- `rl/compare.py` + `python main.py --compare`: confronto visivo PPO vs PD. Coincide con `rl.evaluate` (test).
+- **Scoperta dal confronto visivo: le ruote dell'agente girano nello spazio nullo.**
+  - Sui seed 100–109, a fine episodio il 91–100 % della velocità delle ruote di PPO sta nello spazio nullo della piramide: combinazioni (+,−,+,−) che non producono coppia sul corpo. Per il PD la quota è 0–9 %, perché l'allocazione con pseudo-inversa è a norma minima.
+  - Picco di velocità delle ruote: PPO 1941–6000 RPM, PD 658–2377 RPM. Sui seed 101 (a 7.1 s) e 107 (a 11.3 s) PPO porta una ruota a **saturazione**: proprio due dei seed in cui va peggio del PD. Una ruota saturata perde capacità di controllo e produce picchi d'accelerazione.
+  - Causa probabile: l'agente non osserva le velocità delle ruote e la reward non le penalizza, quindi la componente nello spazio nullo, che non ha effetti sull'assetto, deriva liberamente. È anche la causa principale del maggior consumo d'energia rispetto al PD.
