@@ -29,7 +29,11 @@ class ControllerRun:
 
     def __init__(self, name: str, policy):
         self.name, self.policy = name, policy
-        self.env = SatAttitudeEnv()
+        kwargs = {}
+        if policy != "PD":                   # ambiente con l'osservazione del modello
+            from rl.models import env_kwargs_for
+            kwargs = env_kwargs_for(policy)
+        self.env = SatAttitudeEnv(**kwargs)
         self.pd = QuaternionPDController(self.env.engine.J)
         self.hist = {k: deque(maxlen=self.env.max_episode_steps + 1) for k in self.FIELDS}
 

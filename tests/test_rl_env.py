@@ -31,22 +31,23 @@ def test_action_is_rate_limited_torque_change():
     env = SatAttitudeEnv()
     obs, _ = env.reset(seed=0)
     n = env.n_wheels
-    assert obs.shape == (6 + n,)
-    np.testing.assert_array_equal(obs[6:], 0.0)          # coppia iniziale nulla
+    assert obs.shape == (6 + 2 * n,)
+    T = slice(6, 6 + n)                                   # coppia corrente nell'osservazione
+    np.testing.assert_array_equal(obs[T], 0.0)            # coppia iniziale nulla
 
     # Azione massima per un passo: la coppia sale di Δτ_max = max_torque_rate · Δt
     np.testing.assert_allclose(env.dtau_max, 0.2 * env.tau_max)
     obs, *_ = env.step(np.ones(n, dtype=np.float32))
-    np.testing.assert_allclose(obs[6:], env.dtau_max / env.tau_max, rtol=1e-6)
+    np.testing.assert_allclose(obs[T], env.dtau_max / env.tau_max, rtol=1e-6)
 
     # Dopo molti passi resta limitata a ±T_max
     for _ in range(20):
         obs, *_ = env.step(np.ones(n, dtype=np.float32))
-    np.testing.assert_allclose(obs[6:], 1.0, rtol=1e-6)
+    np.testing.assert_allclose(obs[T], 1.0, rtol=1e-6)
 
     # Azione nulla: la coppia resta invariata
     obs2, *_ = env.step(np.zeros(n, dtype=np.float32))
-    np.testing.assert_allclose(obs2[6:], obs[6:])
+    np.testing.assert_allclose(obs2[T], obs[T])
 
 
 def test_reward_is_bonus_on_target_at_rest():
@@ -105,3 +106,21 @@ def test_saved_models_are_portable(tmp_path):
     cfg = {**PPO_CONFIG, "verbose": 0}
     PPO(env=SatAttitudeEnv(), **cfg).save(tmp_path / "m")
     assert _serialized_functions(tmp_path / "m.zip") == []
+
+
+def test_wheel_speed_in_observation():
+    """v9: le ultime N componenti sono Ω/Ω_max dalla telemetria; v8 senza."""
+    env = SatAttitudeEnv()
+    env.reset(seed=0)
+    for _ in range(30):
+        obs, *_ = env.step(np.ones(env.n_wheels, dtype=np.float32))
+    n = env.n_wheels
+    np.testing.assert_allclose(obs[6 + n:], env.last_tel.wheel_speed / env.omega_w_max, rtol=1e-5)
+    assert np.all(np.abs(obs[6 + n:]) <= 1.0 + 1e-6)
+    assert SatAttitudeEnv(wheel_speed_obs=False).observation_space.shape == (6 + n,)
+
+
+def test_old_models_still_load():
+    """Il modello v8 (osservazione senza ruote) viene associato all'ambiente giusto."""
+    from rl.models import env_kwargs_for, load_model
+    assert env_kwargs_for(load_model("rl/pretrained/ppo_adcs_v8")) == {"wheel_speed_obs": False}

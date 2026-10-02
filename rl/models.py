@@ -26,3 +26,19 @@ def load_model(path, env=None, device: str = "cpu", **kwargs) -> PPO:
     """
     custom = {"learning_rate": LR_SCHEDULE, "lr_schedule": LR_SCHEDULE}
     return PPO.load(path, env=env, device=device, custom_objects=custom, **kwargs)
+
+
+def env_kwargs_for(model) -> dict:
+    """Parametri di SatAttitudeEnv compatibili con l'osservazione del modello.
+
+    I modelli fino alla v8 osservano 6 + N valori (senza velocità delle ruote),
+    dalla v9 6 + 2N. Si deduce dal modello stesso, così valutazione e
+    confronto funzionano con entrambi senza opzioni a mano.
+    """
+    from rl.adcs_env import SatAttitudeEnv
+    n_obs = model.observation_space.shape[0]
+    for flag in (True, False):
+        if SatAttitudeEnv(wheel_speed_obs=flag).observation_space.shape[0] == n_obs:
+            return {"wheel_speed_obs": flag}
+    raise ValueError(f"Il modello osserva {n_obs} valori: nessuna versione dell'ambiente "
+                     f"corrisponde. Va riaddestrato con il codice attuale.")

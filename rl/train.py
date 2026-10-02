@@ -25,7 +25,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from rl.adcs_env import SatAttitudeEnv
 from rl.evaluate import evaluate
-from rl.models import LR_SCHEDULE, load_model
+from rl.models import LR_SCHEDULE, env_kwargs_for, load_model
 
 
 # Iperparametri di PPO (valori di default di SB3, da tarare).
@@ -97,12 +97,14 @@ def train(ppo_config: dict = PPO_CONFIG, train_config: dict = TRAIN_CONFIG) -> P
     Con train_config["eval_every"] > 0 la policy viene valutata periodicamente
     sui seed di validazione e il modello migliore è salvato in <model_path>_best.
     """
-    check_env(SatAttitudeEnv(), warn=True)      # verifica la conformità all'API Gymnasium
+    resume = train_config["resume"]
+    # Con --resume l'ambiente usa l'osservazione del modello ripreso (es. v8 senza ruote).
+    env_kwargs = env_kwargs_for(load_model(resume)) if resume else {}
+    check_env(SatAttitudeEnv(**env_kwargs), warn=True)      # conformità all'API Gymnasium
 
     vec_env = make_vec_env(SatAttitudeEnv, n_envs=train_config["n_envs"],
-                           seed=train_config["seed"],
+                           seed=train_config["seed"], env_kwargs=env_kwargs,
                            vec_env_cls=SubprocVecEnv if train_config["subproc"] else DummyVecEnv)
-    resume = train_config["resume"]
     if resume:
         model = load_model(resume, env=vec_env, device=ppo_config.get("device", "auto"),
                            tensorboard_log=str(train_config["log_dir"]))

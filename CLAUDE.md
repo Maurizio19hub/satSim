@@ -16,7 +16,7 @@ Simulatore ADCS di un CubeSat 3U con 4 ruote di reazione, più un agente PPO (St
 ## Comandi
 ```bash
 pip install -r requirements.txt
-python -m pytest -q                                   # 16 test (fisica + RL)
+python -m pytest -q                                   # 18 test (fisica + RL)
 python main.py                                        # GUI con il PD
 python main.py --compare --seed 101                   # confronto PPO (sx) vs PD (dx)
 python -m rl.train --subproc --out models/<nome>      # 2 M passi, ~45 min nel cloud
@@ -29,7 +29,7 @@ python -m rl.evaluate models/<nome>_best              # confronto con il PD sui 
 - `satsim/`: fisica pura, nessuna dipendenza da Qt o RL. Il limite sulla variazione della coppia (`max_torque_rate`) è nell'engine e vale per ogni controllore.
 - `rl/adcs_env.py`: **unica** definizione di osservazione, azione e reward.
   - `rl/train.py`, `rl/evaluate.py` e `rl/compare.py` la riusano, senza duplicare logica RL.
-  - Cambiare l'osservazione non richiede modifiche alla GUI, ma rende incompatibili i modelli già addestrati: vanno riaddestrati.
+  - Cambiare l'osservazione non richiede modifiche alla GUI, ma rende incompatibili i modelli già addestrati. Per mantenerli utilizzabili si aggiunge un'opzione all'ambiente (come `wheel_speed_obs`) e la si gestisce in `rl.models.env_kwargs_for`, che sceglie il formato in base al modello.
 - `gui/`: solo visualizzazione. `theme.py` contiene il tema condiviso; `compare_window.py` importa la parte RL solo con `--compare`.
 - Il training non deve mai importare la GUI (lo verifica `test_training_is_headless`).
 - Modelli: caricarli sempre con `rl.models.load_model`, mai con `PPO.load`. Non mettere funzioni Python (closure, lambda) negli iperparametri: verrebbero salvate come bytecode, non portabile tra versioni di Python (lo verifica `test_saved_models_are_portable`). Per gli schedule usare le classi di Stable-Baselines3.
@@ -45,17 +45,20 @@ python -m rl.evaluate models/<nome>_best              # confronto con il PD sui 
 - Con lo stesso seed, GUI (`ClosedLoopSimulation`) e ambiente RL partono dalla stessa identica condizione iniziale.
 - Quando cambia la reward, ricalcolare la baseline del PD (`python -m rl.evaluate`).
 
-## Stato attuale (2026-10-01)
+## Stato attuale (2026-10-02)
 - **Modello di riferimento: v8** (`rl/pretrained/ppo_adcs_v8.zip`).
   - Osservazione: 10 valori, cioè errore d'assetto in scala log (3), ω (3), coppia corrente (4).
   - Azione: variazione di coppia.
   - Reward: −0.01·θ − 0.02·ln(1+θ/0.01°) − penalità sulle accelerazioni oltre 2 °/s² + bonus sotto 0.1° e 0.01°.
   - Training: learning rate lineare 3e-4→0, 2 M passi.
   - Test: reward −27.8 vs PD −42.9; errore finale 0.0003° vs 0.0031°. **Criteri soddisfatti.**
+- **Codice: v9.** L'osservazione include Ω/Ω_max delle ruote (14 valori); la reward è invariata rispetto alla v8. Modello v9 non ancora addestrato: l'utente lo addestra in locale.
 - **Problema aperto principale: ruote nello spazio nullo.**
   - L'agente accumula il 91–100 % della velocità delle ruote in combinazioni (+,−,+,−) che non agiscono sul corpo, fino alla saturazione (6000 RPM) sui seed 101 e 107. Il PD ne accumula lo 0–9 %.
   - Causa probabile: le velocità delle ruote non sono nell'osservazione né penalizzate nella reward.
-  - Prossimo passo da discutere con l'utente: aggiungere Ω/Ω_max all'osservazione e/o una penalità sulla velocità delle ruote.
+  - v9 aggiunge Ω/Ω_max all'osservazione: da verificare con il training se basta.
+  - Passo successivo previsto: una reward che penalizzi la velocità delle ruote. La forma è da decidere con l'utente; ridurre la velocità dovrebbe abbassare anche i consumi, ma per l'energia l'utente pensa di agire anche sull'accelerazione.
+  - Dopo le verifiche l'utente porterà tutto su `main` e si proseguirà su un branch nuovo.
 - **Altri punti aperti** (dopo il precedente):
   - accelerazioni (|α| max 14.1 vs 6.2 °/s²) ed energia (69.1 vs 61.3 J) peggiori del PD;
   - `gamma` 0.99 → 0.995 per i seed con angolo iniziale grande;

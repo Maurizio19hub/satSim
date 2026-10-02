@@ -2,7 +2,12 @@
 
 Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nel [README principale](../README.md).
 
-**Stato:** v5 dell'ambiente. Azione = variazione di coppia delle ruote. Osservazione = errore d'assetto in scala logaritmica + velocità angolare + coppia corrente. Reward = − errore d'assetto (lineare) − accelerazioni oltre soglia + bonus vicino al target. Non ancora addestrato a convergenza.
+**Stato:** v9 dell'ambiente.
+- **Azione:** variazione di coppia delle ruote.
+- **Osservazione:** errore d'assetto in scala logaritmica + velocità angolare + coppia corrente + velocità delle ruote.
+- **Reward:** − errore d'assetto (lineare + logaritmica) − accelerazioni oltre soglia + bonus sotto 0.1° e 0.01°.
+- **Modello di riferimento:** v8, in `rl/pretrained/`. Il modello v9 è ancora da addestrare.
+- Il dettaglio di ogni versione è nel registro (§9).
 
 ---
 
@@ -52,7 +57,7 @@ Le dipendenze vanno in un solo verso: `rl → satsim`. L'engine non importa null
 |---|---|---|
 | **Passo di controllo** | Un passo dell'engine, Δt = `params.dt` (0.05 s). Azione mantenuta costante sul passo (zero-order hold). | deciso |
 | **Azione** | `Box([-1, 1]^N)`: **variazione** della coppia motore di ogni ruota. `τ ← clip(τ + action · Δτ_max, ±T_max)` con `Δτ_max = max_torque_rate · Δt` (parametro fisico in `satsim/config.py`, = 0.2 · T_max). I limiti fisici (coppia e saturazione in velocità) restano applicati dall'engine. | v3 |
-| **Osservazione** | `Box(6 + N)`: `[e_log (3) , ω / OMEGA_SCALE (3) , τ / T_max (N)]`, cioè errore d'assetto in scala logaritmica, velocità angolare e coppia motore corrente. `OMEGA_SCALE = 0.1 rad/s`. | v5 |
+| **Osservazione** | `Box(6 + 2N)`: `[e_log (3) , ω / OMEGA_SCALE (3) , τ / T_max (N) , Ω / Ω_max (N)]`, cioè errore d'assetto in scala logaritmica, velocità angolare, coppia motore corrente e velocità delle ruote. `OMEGA_SCALE = 0.1 rad/s`. Con `wheel_speed_obs=False` si ottiene il formato `Box(6 + N)` dei modelli fino alla v8. | v9 |
 | **Stato iniziale** | Assetto casuale a 40–80° dal target (asse casuale), `ω` uniforme in ±0.05 rad/s, ruote ferme, coppia nulla. Campionato con `self.np_random`. | v3 |
 | **Terminazione** | Nessuna: `terminated` è sempre `False`. | v1 |
 | **Troncamento** | `max_episode_steps` (default 2000 passi = 100 s). | deciso |
@@ -510,3 +515,17 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - `rl/pretrained/ppo_adcs_v8.zip` risalvato in formato portabile: stessi pesi, risultati identici (−27.8 vs −42.9).
 - Test `test_saved_models_are_portable`: nessuna funzione serializzata nei modelli pubblicati né in un modello appena salvato.
 - Regola: caricare i modelli sempre con `rl.models.load_model`, mai con `PPO.load` diretto.
+
+### 2026-10-02 — v9: velocità delle ruote nell'osservazione
+- **Motivo:** l'agente v8 accumula il 91–100 % della velocità delle ruote nello spazio nullo, fino alla saturazione sui seed 101 e 107, senza poterlo vedere (registro del 2026-10-01).
+- **Modifica:** in `_get_obs` si aggiunge `tel.wheel_speed / Ω_max`, cioè le velocità delle 4 ruote prese dalla telemetria dell'ultimo passo. Il dato fisico è in rad/s; diviso per Ω_max = 628 rad/s (6000 RPM) vale tra −1 e +1, dove ±1 significa saturazione.
+  - L'osservazione passa da 10 a 14 valori.
+  - Senza normalizzazione un ingresso fino a ±628, contro gli altri intorno a ±1, dominerebbe la rete.
+- **Reward invariata:** una modifica alla volta. Baseline PD invariata (−42.9).
+- **Compatibilità con i modelli fino alla v8:**
+  - opzione `SatAttitudeEnv(wheel_speed_obs=False)`;
+  - `rl.models.env_kwargs_for(model)` sceglie il formato in base al numero di ingressi del modello;
+  - usata da `rl.evaluate`, dal confronto (`--compare`) e da `rl.train --resume`. Il modello v8 continua a funzionare ovunque, con risultati invariati.
+- Test: `test_wheel_speed_in_observation`, `test_old_models_still_load` (18 test in totale).
+- **Aspettativa:** osservare le ruote dà all'agente l'informazione, ma non un incentivo a tenerle lente, perché la reward non le penalizza. Il passo successivo previsto è una penalità sulla velocità delle ruote.
+- **Risultati:** training da fare (2 M passi, in locale).

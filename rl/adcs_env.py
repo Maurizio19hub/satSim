@@ -7,10 +7,11 @@ controllore PD. Non importa nulla della GUI né di Stable-Baselines3: è solo
 fisica + interfaccia Gymnasium. La logica RL (spazi, osservazione, reward)
 è documentata in rl/README.md.
 
-Stato attuale: v8.
+Stato attuale: v9.
 - Azione = variazione della coppia motore di ogni ruota (coppia rate-limited).
-- Osservazione = errore d'assetto in scala logaritmica, velocità angolare e
-  coppia motore corrente.
+- Osservazione = errore d'assetto in scala logaritmica, velocità angolare,
+  coppia motore corrente e velocità delle ruote (v9; disattivabile con
+  wheel_speed_obs=False per i modelli fino alla v8).
 - Reward = penalità lineare + logaritmica sull'errore d'assetto e sulle accelerazioni
   oltre soglia + due bonus per ogni passo vicino al target (0.1° e 0.01°).
 """
@@ -65,7 +66,8 @@ def log_attitude_error(q_err: np.ndarray, theta0: float = LOG_THETA0) -> np.ndar
 class SatAttitudeEnv(gym.Env):
     """Ambiente di controllo d'assetto: azione = variazione delle coppie motore.
 
-    Osservazione (6 + N): [ e_log (3) | ω / OMEGA_SCALE (3) | τ / T_max (N) ]
+    Osservazione (6 + 2N): [ e_log (3) | ω / OMEGA_SCALE (3) | τ / T_max (N) | Ω / Ω_max (N) ]
+                  (6 + N con wheel_speed_obs=False, formato dei modelli fino alla v8)
     Azione (N):           Δτ normalizzata in [-1, 1],
                           τ ← clip(τ + action · Δτ_max, ±T_max)
                           con Δτ_max = max_torque_rate · Δt (limite del motore,
@@ -75,7 +77,8 @@ class SatAttitudeEnv(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, params: SimParams | None = None, max_episode_steps: int = 2000,
-                 render_mode: str | None = None, reward_config: dict | None = None):
+                 render_mode: str | None = None, reward_config: dict | None = None,
+                 wheel_speed_obs: bool = True):
         """Inizializzazione: engine fisico, spazi di azione e osservazione, parametri."""
         super().__init__()
         self.engine = SatelliteEngine(params)
@@ -89,9 +92,12 @@ class SatAttitudeEnv(gym.Env):
         self.render_mode = render_mode
         self.reward_config = {**REWARD_CONFIG, **(reward_config or {})}
 
+        self.wheel_speed_obs = wheel_speed_obs
+        self.omega_w_max = self.engine.rw.omega_max          # [rad/s] (6000 RPM)
+
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_wheels,), dtype=np.float32)
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(6 + self.n_wheels,),
-                                            dtype=np.float32)
+        n_obs = 6 + self.n_wheels * (2 if wheel_speed_obs else 1)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(n_obs,), dtype=np.float32)
 
         self._steps = 0
         self._tau = np.zeros(self.n_wheels)     # coppia motore corrente [N·m]
@@ -164,9 +170,13 @@ class SatAttitudeEnv(gym.Env):
         return float(-err_pen - c["k_accel"] * accel_excess + bonus)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
-        """Osservazione: errore d'assetto in scala log, ω normalizzata, coppia corrente normalizzata."""
-        return np.concatenate((log_attitude_error(tel.q_err), tel.omega / OMEGA_SCALE,
-                               self._tau / self.tau_max)).astype(np.float32)
+        """Osservazione: errore d'assetto in scala log, ω normalizzata, coppia corrente
+        normalizzata e velocità delle ruote dalla telemetria (rad/s), normalizzata
+        con Ω_max: ±1 = ruota in saturazione."""
+        parts = [log_attitude_error(tel.q_err), tel.omega / OMEGA_SCALE, self._tau / self.tau_max]
+        if self.wheel_speed_obs:
+            parts.append(tel.wheel_speed / self.omega_w_max)
+        return np.concatenate(parts).astype(np.float32)
 
     def _info(self, tel: Telemetry) -> dict:
         return dict(att_err_deg=tel.att_err_deg, alpha_deg=np.degrees(self._alpha),

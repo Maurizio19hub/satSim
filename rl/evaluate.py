@@ -57,7 +57,11 @@ def run_episode(env: SatAttitudeEnv, seed: int, policy) -> dict:
 
 
 def evaluate(policy, seeds=EVAL_SEEDS) -> dict:
-    env = SatAttitudeEnv()
+    kwargs = {}
+    if not isinstance(policy, str):          # modello SB3: ambiente con la sua osservazione
+        from rl.models import env_kwargs_for
+        kwargs = env_kwargs_for(policy)
+    env = SatAttitudeEnv(**kwargs)
     rows = [run_episode(env, s, policy) for s in seeds]
     return {k: np.array([r[k] for r in rows]) for k in rows[0]}
 
