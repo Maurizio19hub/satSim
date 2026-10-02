@@ -16,7 +16,7 @@ Simulatore ADCS di un CubeSat 3U con 4 ruote di reazione, più un agente PPO (St
 ## Comandi
 ```bash
 pip install -r requirements.txt
-python -m pytest -q                                   # 15 test (fisica + RL)
+python -m pytest -q                                   # 16 test (fisica + RL)
 python main.py                                        # GUI con il PD
 python main.py --compare --seed 101                   # confronto PPO (sx) vs PD (dx)
 python -m rl.train --subproc --out models/<nome>      # 2 M passi, ~45 min nel cloud
@@ -32,6 +32,12 @@ python -m rl.evaluate models/<nome>_best              # confronto con il PD sui 
   - Cambiare l'osservazione non richiede modifiche alla GUI, ma rende incompatibili i modelli già addestrati: vanno riaddestrati.
 - `gui/`: solo visualizzazione. `theme.py` contiene il tema condiviso; `compare_window.py` importa la parte RL solo con `--compare`.
 - Il training non deve mai importare la GUI (lo verifica `test_training_is_headless`).
+- Modelli: caricarli sempre con `rl.models.load_model`, mai con `PPO.load`. Non mettere funzioni Python (closure, lambda) negli iperparametri: verrebbero salvate come bytecode, non portabile tra versioni di Python (lo verifica `test_saved_models_are_portable`). Per gli schedule usare le classi di Stable-Baselines3.
+
+## Ambiente locale dell'utente
+- Fedora, Python 3.14, ROS 2 installato (`~/ros2_lyrical`). Il `source` di ROS 2 imposta `PYTHONPATH` e `LD_LIBRARY_PATH`, che interferiscono con satSim: plugin pytest di ROS, Qt di sistema caricata al posto di quella di PySide6.
+- Consigliato: virtualenv `.venv` in un terminale senza variabili di ROS (`unset PYTHONPATH LD_LIBRARY_PATH AMENT_PREFIX_PATH CMAKE_PREFIX_PATH`) e PyTorch solo CPU (`pip install torch --index-url https://download.pytorch.org/whl/cpu`).
+- Il cloud usa Python 3.11: i modelli addestrati qui devono funzionare anche con 3.14.
 
 ## Criteri di valutazione
 - **Seed di test 100–109** (`rl/evaluate.py`): successo se reward ≥ PD **e** errore finale ≤ 0.01° su tutti i seed.

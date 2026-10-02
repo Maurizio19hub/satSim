@@ -80,9 +80,9 @@ class Comparison:
     """Due satelliti (PPO a sinistra, PD a destra) che avanzano insieme."""
 
     def __init__(self, model_path: str = DEFAULT_MODEL, seed: int = 0):
-        from stable_baselines3 import PPO
+        from rl.models import load_model
         self.model_path = model_path
-        self.runs = [ControllerRun("PPO", PPO.load(model_path, device="cpu")),
+        self.runs = [ControllerRun("PPO", load_model(model_path)),
                      ControllerRun("PD", "PD")]
         self.dt = self.runs[0].env.dt
         self._impulse_left = 0.0

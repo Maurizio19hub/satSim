@@ -499,3 +499,14 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - Sui seed 100–109, a fine episodio il 91–100 % della velocità delle ruote di PPO sta nello spazio nullo della piramide: combinazioni (+,−,+,−) che non producono coppia sul corpo. Per il PD la quota è 0–9 %, perché l'allocazione con pseudo-inversa è a norma minima.
   - Picco di velocità delle ruote: PPO 1941–6000 RPM, PD 658–2377 RPM. Sui seed 101 (a 7.1 s) e 107 (a 11.3 s) PPO porta una ruota a **saturazione**: proprio due dei seed in cui va peggio del PD. Una ruota saturata perde capacità di controllo e produce picchi d'accelerazione.
   - Causa probabile: l'agente non osserva le velocità delle ruote e la reward non le penalizza, quindi la componente nello spazio nullo, che non ha effetti sull'assetto, deriva liberamente. È anche la causa principale del maggior consumo d'energia rispetto al PD.
+
+### 2026-10-02 — Modelli portabili tra versioni di Python
+- **Bug:** caricare `ppo_adcs_v8` con Python 3.14, sul PC locale, causava un *segmentation fault* sia in `pytest` sia in `main.py --compare`.
+  - Il learning rate era una funzione Python (closure `linear_schedule`). Stable-Baselines3 la salvava nel `.zip` come bytecode di Python 3.11, la versione del cloud.
+  - Caricata con Python 3.14, quel bytecode faceva andare in crash l'interprete. Lo stack del crash indicava `rl/train.py, in schedule`.
+- **Correzione:**
+  - `rl/models.py`: `LR_SCHEDULE = LinearSchedule(3e-4 → 0)` di Stable-Baselines3. È una classe, serializzata per riferimento, quindi portabile. Stessi valori della funzione precedente.
+  - `load_model()`: carica un modello sostituendo il learning rate salvato con `LR_SCHEDULE`, senza mai deserializzarlo. Usato da `evaluate.py`, `compare.py` e `train.py --resume`.
+  - `rl/pretrained/ppo_adcs_v8.zip` risalvato in formato portabile: stessi pesi, risultati identici (−27.8 vs −42.9).
+- Test `test_saved_models_are_portable`: nessuna funzione serializzata nei modelli pubblicati né in un modello appena salvato.
+- Regola: caricare i modelli sempre con `rl.models.load_model`, mai con `PPO.load` diretto.

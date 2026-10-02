@@ -75,7 +75,6 @@ def test_log_attitude_error():
 
 def test_comparison_matches_evaluate():
     """La modalità confronto (rl/compare.py) riproduce rl/evaluate.py episodio per episodio."""
-    from stable_baselines3 import PPO
     from rl.compare import Comparison
     from rl.evaluate import evaluate
     c = Comparison("rl/pretrained/ppo_adcs_v8", seed=104)
@@ -85,3 +84,24 @@ def test_comparison_matches_evaluate():
     ref_pd = evaluate("PD", seeds=[104])["ret"][0]
     assert abs(c.runs[0].ret - ref_ppo) < 1e-6
     assert abs(c.runs[1].ret - ref_pd) < 1e-6
+
+
+def _serialized_functions(zip_path) -> list:
+    import json
+    import zipfile
+    data = json.loads(zipfile.ZipFile(zip_path).read("data"))
+    return [k for k, v in data.items()
+            if isinstance(v, dict) and "function" in str(v.get(":type:", ""))]
+
+
+def test_saved_models_are_portable(tmp_path):
+    """Nessuna funzione Python serializzata nei modelli: il bytecode cambia tra
+    versioni di Python (3.11 → 3.14 dava segmentation fault al caricamento)."""
+    from pathlib import Path
+    from stable_baselines3 import PPO
+    from rl.train import PPO_CONFIG
+    for p in Path("rl/pretrained").glob("*.zip"):
+        assert _serialized_functions(p) == [], p
+    cfg = {**PPO_CONFIG, "verbose": 0}
+    PPO(env=SatAttitudeEnv(), **cfg).save(tmp_path / "m")
+    assert _serialized_functions(tmp_path / "m.zip") == []

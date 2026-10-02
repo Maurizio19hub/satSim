@@ -82,8 +82,8 @@ def main():
 
     results = {}
     if a.model:
-        from stable_baselines3 import PPO
-        results["PPO"] = evaluate(PPO.load(a.model, device="cpu"))
+        from rl.models import load_model
+        results["PPO"] = evaluate(load_model(a.model))
     for name in ("PD", "libero", "casuale"):
         results[name] = evaluate(name)
     print_table(results)

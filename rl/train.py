@@ -25,22 +25,13 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from rl.adcs_env import SatAttitudeEnv
 from rl.evaluate import evaluate
-
-
-def linear_schedule(initial: float):
-    """Learning rate che scende linearmente da `initial` a 0 durante l'addestramento.
-
-    SB3 passa progress_remaining, che va da 1 (inizio) a 0 (fine).
-    """
-    def schedule(progress_remaining: float) -> float:
-        return progress_remaining * initial
-    return schedule
+from rl.models import LR_SCHEDULE, load_model
 
 
 # Iperparametri di PPO (valori di default di SB3, da tarare).
 PPO_CONFIG = dict(
     policy="MlpPolicy",
-    learning_rate=linear_schedule(3e-4),    # 3e-4 → 0 lineare
+    learning_rate=LR_SCHEDULE,  # 3e-4 → 0 lineare (rl/models.py, portabile tra versioni di Python)
     n_steps=2048,           # passi raccolti per ambiente prima di ogni aggiornamento
     batch_size=64,
     n_epochs=10,
@@ -113,8 +104,8 @@ def train(ppo_config: dict = PPO_CONFIG, train_config: dict = TRAIN_CONFIG) -> P
                            vec_env_cls=SubprocVecEnv if train_config["subproc"] else DummyVecEnv)
     resume = train_config["resume"]
     if resume:
-        model = PPO.load(resume, env=vec_env, device=ppo_config.get("device", "auto"),
-                         tensorboard_log=str(train_config["log_dir"]))
+        model = load_model(resume, env=vec_env, device=ppo_config.get("device", "auto"),
+                           tensorboard_log=str(train_config["log_dir"]))
         print(f"Ripreso {resume}: {model.num_timesteps} passi già eseguiti")
     else:
         model = PPO(env=vec_env, tensorboard_log=str(train_config["log_dir"]),
