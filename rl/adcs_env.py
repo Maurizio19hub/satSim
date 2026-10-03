@@ -44,6 +44,8 @@ REWARD_CONFIG = dict(
     bonus_theta_deg=0.1,    # soglia d'errore per il bonus [°]
     bonus2=0.02,            # secondo bonus (precisione), si somma al primo
     bonus2_theta_deg=0.01,  # soglia d'errore per il secondo bonus [°]
+    wheel_speed_thr=0.3,    # soglia di velocità delle ruote, frazione di Ω_max (il PD sta sotto 0.4)
+    k_wheel=0.05,           # penalità per ogni unità di |Ω|/Ω_max oltre soglia, per ruota
 )
 
 
@@ -150,6 +152,7 @@ class SatAttitudeEnv(gym.Env):
 
             r = − k_err · θ − k_log · ln(1 + θ/θ0)              [θ in gradi]
                 − k_accel · Σ_assi max(0, |α_i| − α_max)        [α in °/s²]
+                − k_wheel · Σ_ruote max(0, |Ω_j|/Ω_max − thr)    [Ω_max = 6000 RPM]
                 + bonus · [θ < θ_bonus] + bonus2 · [θ < θ_bonus2]
 
         Il primo termine penalizza l'errore d'assetto: la parte lineare domina
@@ -158,7 +161,9 @@ class SatAttitudeEnv(gym.Env):
         precisione, anche sotto le soglie dei bonus). Il
         secondo penalizza solo le accelerazioni oltre soglia. I bonus premiano
         ogni passo trascorso vicino al target (0.1°) e molto vicino (0.01°),
-        quindi il restarci con la precisione richiesta.
+        quindi il restarci con la precisione richiesta. La penalità sulle ruote è
+        nulla sotto soglia: non tocca il regime del PD, ma scoraggia la deriva
+        nello spazio nullo e l'avvicinarsi alla saturazione.
         """
         c = self.reward_config
         alpha_deg = np.degrees(np.abs(self._alpha))
@@ -166,8 +171,11 @@ class SatAttitudeEnv(gym.Env):
         theta = tel.att_err_deg
         bonus = (c["bonus"] * (theta < c["bonus_theta_deg"])
                  + c["bonus2"] * (theta < c["bonus2_theta_deg"]))
+        wheel_excess = np.maximum(0.0, np.abs(tel.wheel_speed) / self.omega_w_max
+                                  - c["wheel_speed_thr"]).sum()
         err_pen = c["k_err"] * theta + c["k_log"] * np.log1p(theta / c["log_theta0_deg"])
-        return float(-err_pen - c["k_accel"] * accel_excess + bonus)
+        return float(-err_pen - c["k_accel"] * accel_excess
+                      - c["k_wheel"] * wheel_excess + bonus)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
         """Osservazione: errore d'assetto in scala log, ω normalizzata, coppia corrente

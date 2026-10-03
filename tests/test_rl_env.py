@@ -61,6 +61,22 @@ def test_reward_is_bonus_on_target_at_rest():
     assert abs(r - (c["bonus"] + c["bonus2"])) < 1e-3
 
 
+def test_wheel_speed_penalty():
+    from types import SimpleNamespace
+    env = SatAttitudeEnv()
+    env.reset(seed=0)
+    c = env.reward_config
+    base = dict(att_err_deg=0.0)
+    slow = SimpleNamespace(**base, wheel_speed=np.full(4, 0.2 * env.omega_w_max))
+    fast = SimpleNamespace(**base, wheel_speed=np.array([0.8, -1.0, 0.0, 0.1]) * env.omega_w_max)
+    a = np.zeros(4)
+    assert env._compute_reward(slow, a) == env._compute_reward(
+        SimpleNamespace(**base, wheel_speed=np.zeros(4)), a)       # sotto soglia: nessun effetto
+    expected = c["k_wheel"] * ((0.8 - c["wheel_speed_thr"]) + (1.0 - c["wheel_speed_thr"]))
+    d = env._compute_reward(slow, a) - env._compute_reward(fast, a)
+    assert abs(d - expected) < 1e-9
+
+
 def test_log_attitude_error():
     axis = np.array([0.0, 0.6, 0.8])
     np.testing.assert_array_equal(log_attitude_error(np.array([1.0, 0, 0, 0])), 0.0)

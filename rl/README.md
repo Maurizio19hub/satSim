@@ -2,10 +2,10 @@
 
 Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nel [README principale](../README.md).
 
-**Stato:** v9 dell'ambiente.
+**Stato:** v10 dell'ambiente (ramo `claude/rl-v10-wheel-penalty`, da testare in locale).
 - **Azione:** variazione di coppia delle ruote.
 - **Osservazione:** errore d'assetto in scala logaritmica + velocità angolare + coppia corrente + velocità delle ruote.
-- **Reward:** − errore d'assetto (lineare + logaritmica) − accelerazioni oltre soglia + bonus sotto 0.1° e 0.01°.
+- **Reward:** − errore d'assetto (lineare + logaritmica) − accelerazioni oltre soglia − velocità delle ruote oltre soglia + bonus sotto 0.1° e 0.01°.
 - **Modello di riferimento:** v8, in `rl/pretrained/`. Il modello v9 è ancora da addestrare.
 - Il dettaglio di ogni versione è nel registro (§9).
 
@@ -126,6 +126,10 @@ $$
 | $k_{err}$ | penalità per grado di errore, per passo | `k_err = 0.01` |
 | $\alpha_{max}$ | soglia di accelerazione per asse | `alpha_max_deg = 2.0` °/s² (confermato) |
 | $k_{acc}$ | penalità per °/s² oltre soglia | `k_accel = 0.01` |
+| $\Omega_j/\Omega_{max}$ | velocità della ruota j, frazione di 6000 RPM | — |
+| $thr$, $k_{wheel}$ | soglia e peso della penalità sulle ruote (v10) | `wheel_speed_thr = 0.3`, `k_wheel = 0.05` |
+
+Dalla v10 la reward ha un terzo termine, $-\,k_{wheel}\sum_j \max(0,\ |\Omega_j|/\Omega_{max} - thr)$, nullo sotto soglia.
 
 **Termine d'errore.** Penalità lineare e sempre attiva: a 60° vale −0.6 per passo, a 1° vale −0.01. La reward è sempre ≤ 0 e il massimo (0) si ha solo sul target. Sull'episodio la penalità è proporzionale all'area sotto la curva θ(t). Quindi premia sia l'**arrivare presto** sia il **restare** sul target: è il motivo per cui ha sostituito il termine differenziale della v1 (§ limiti della v1).
 
@@ -529,3 +533,13 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 - Test: `test_wheel_speed_in_observation`, `test_old_models_still_load` (18 test in totale).
 - **Aspettativa:** osservare le ruote dà all'agente l'informazione, ma non un incentivo a tenerle lente, perché la reward non le penalizza. Il passo successivo previsto è una penalità sulla velocità delle ruote.
 - **Risultati:** training da fare (2 M passi, in locale).
+
+### 2026-10-03 — v10: penalità sulla velocità delle ruote (da addestrare e testare)
+- **Risultato v9 (osservazione a 14 valori, reward invariata):** errore finale 0.0008° e reward −34.5, peggio del v8 (−27.8, errore 0.0003°) e del PD solo sull'energia/accelerazioni. Osservare le ruote senza un incentivo a tenerle lente non basta, come previsto.
+- **Misura (seed 100–109, picco di |Ω|/Ω_max):** PD 0.11–0.40 (media nel tempo 0.04); v8 0.32–1.00 (media nel tempo 0.52, saturazione sui seed 101 e 107).
+- **Modifica:** reward −`k_wheel · Σ_j max(0, |Ω_j|/Ω_max − 0.3)`, con `k_wheel = 0.05`.
+  - Soglia 0.3 (1800 RPM): il PD la supera solo su 2 seed su 10, di poco, quindi la manovra "normale" non è penalizzata e la precisione dell'agente non è toccata direttamente.
+  - Hinge lineare, come per l'accelerazione: la penalità interviene solo sulla deriva nello spazio nullo e sull'avvicinamento alla saturazione. A Ω = Ω_max su una ruota costa 0.035 per passo, confrontabile con la penalità d'errore a ~1° (0.10).
+- **Baseline PD con la nuova reward:** −43.0 (era −42.9). Il modello v8, che non osserva le ruote, scende a −127.4: conferma che la penalità è attiva sul suo comportamento.
+- Test: `test_wheel_speed_penalty` (19 test, tutti passati). Nessun cambio di osservazione: il formato a 14 valori è quello della v9.
+- **Da fare:** training da zero 2 M passi (`python -m rl.train --subproc`), poi `rl.evaluate` sul modello `_best`. Se l'errore finale peggiora, ridurre `k_wheel` (0.02) o alzare la soglia; se le ruote superano ancora ~0.5, alzare `k_wheel`.
