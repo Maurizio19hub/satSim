@@ -2,11 +2,11 @@
 
 Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nel [README principale](../README.md).
 
-**Stato:** v11 dell'ambiente (ramo `claude/rl-v10-wheel-penalty`, da addestrare e testare in locale).
+**Stato:** v11 dell'ambiente.
 - **Azione:** variazione di coppia delle ruote.
 - **Osservazione:** errore d'assetto in scala logaritmica + velocità angolare + coppia corrente + velocità delle ruote.
 - **Reward:** − errore d'assetto (lineare + logaritmica) − accelerazioni oltre soglia − velocità delle ruote nello spazio nullo + bonus sotto 0.1° e 0.01°.
-- **Modello di riferimento:** v8, in `rl/pretrained/`. Il modello v9 è ancora da addestrare.
+- **Modello di riferimento:** v11, `rl/pretrained/ppo_adcs_v11.zip` (4 M passi): reward −28.2 vs PD −43.2, errore finale 0.0004°, nessuna deriva delle ruote. Default di `python main.py --compare`.
 - Il dettaglio di ogni versione è nel registro (§9).
 
 ---
@@ -41,7 +41,8 @@ rl/
 ├── evaluate.py     # confronto di un modello con PD e riferimenti sui seed di test
 ├── compare.py      # confronto passo-passo PPO vs PD per la GUI (python main.py --compare)
 ├── pretrained/
-│   └── ppo_adcs_v8.zip   # modello v8 migliore (1.7 M passi), criteri di successo raggiunti
+│   ├── ppo_adcs_v8.zip   # modello v8 migliore (1.7 M passi), osservazione 10 valori
+│   └── ppo_adcs_v11.zip  # modello v11 (4 M passi), osservazione 14 valori: riferimento attuale
 └── README.md       # questo documento
 ```
 
@@ -617,3 +618,8 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - Peggiorano |α| max (18.0 °/s²) e il picco massimo: 5945 RPM sul seed di test 105 (99 % di Ω_max). Non è deriva (spazio nullo 0 %) ma momento usato per la manovra; il margine contro la saturazione è però nullo.
   - Proposto come nuovo modello di riferimento (`rl/pretrained/ppo_adcs_v11.zip`, da pubblicare).
   - Prossimi punti: accelerazioni, margine di saturazione delle ruote (limite sul momento totale), energia.
+
+### 2026-10-03 — Pubblicato il modello v11
+- `rl/pretrained/ppo_adcs_v11.zip`: modello `local_training_v4_seed1@3_best` (v11, seed 1, ripreso a 4 M con seed 3), addestrato in locale con Python 3.14.
+- Verificato nel cloud con Python 3.11: `rl.evaluate` riproduce esattamente gli stessi valori (−28.2 vs −43.2), quindi il modello è portabile. `test_saved_models_are_portable` passa.
+- Diventa il modello di default di `python main.py --compare` e `rl/compare.py`. `test_comparison_matches_evaluate` usa ora il v11 (seed 105, quello col picco di velocità più alto). Il v8 resta per `test_old_models_still_load`.

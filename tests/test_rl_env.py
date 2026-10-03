@@ -100,11 +100,11 @@ def test_comparison_matches_evaluate():
     """La modalità confronto (rl/compare.py) riproduce rl/evaluate.py episodio per episodio."""
     from rl.compare import Comparison
     from rl.evaluate import evaluate
-    c = Comparison("rl/pretrained/ppo_adcs_v8", seed=104)
+    c = Comparison("rl/pretrained/ppo_adcs_v11", seed=105)
     c.advance(10_000)
     assert c.done and abs(c.t - 100.0) < 1e-9
-    ref_ppo = evaluate(c.runs[0].policy, seeds=[104])["ret"][0]
-    ref_pd = evaluate("PD", seeds=[104])["ret"][0]
+    ref_ppo = evaluate(c.runs[0].policy, seeds=[105])["ret"][0]
+    ref_pd = evaluate("PD", seeds=[105])["ret"][0]
     assert abs(c.runs[0].ret - ref_ppo) < 1e-6
     assert abs(c.runs[1].ret - ref_pd) < 1e-6
 
