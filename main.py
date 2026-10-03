@@ -28,8 +28,8 @@ def parse_args():
     ap.add_argument("--compare", action="store_true",
                     help="confronto PPO vs PD sulla stessa condizione iniziale\n"
                          "(richiede gymnasium e stable-baselines3)")
-    ap.add_argument("--model", default="rl/pretrained/ppo_adcs_v11",
-                    help="modello PPO per --compare (default rl/pretrained/ppo_adcs_v11)")
+    ap.add_argument("--model", default="rl/pretrained/local_training_v4_seed1@3_best",
+                    help="modello PPO per --compare (default rl/pretrained/local_training_v4_seed1@3_best)")
     return ap.parse_args()
 
 

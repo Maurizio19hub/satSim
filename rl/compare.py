@@ -17,7 +17,7 @@ from rl.adcs_env import SatAttitudeEnv
 from rl.evaluate import pd_action
 from satsim.controller import QuaternionPDController
 
-DEFAULT_MODEL = "rl/pretrained/ppo_adcs_v11"
+DEFAULT_MODEL = "rl/pretrained/local_training_v4_seed1@3_best"
 IMPULSE_TORQUE = 5e-3       # [N·m]
 IMPULSE_DURATION = 1.0      # [s]
 

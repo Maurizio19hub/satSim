@@ -61,7 +61,7 @@ python -m pytest -q                    # test di verifica della fisica
 ### Modalità confronto PPO vs PD
 
 ```bash
-python main.py --compare                 # seed 0, modello rl/pretrained/ppo_adcs_v11
+python main.py --compare                 # seed 0, modello rl/pretrained/local_training_v4_seed1@3_best
 python main.py --compare --seed 101 --model models/ppo_adcs_best
 ```
 
@@ -101,7 +101,7 @@ satSim/
 │   ├── train.py             # addestramento PPO headless: python -m rl.train
 │   ├── evaluate.py          # confronto numerico di un modello con il PD
 │   ├── compare.py           # logica del confronto PPO vs PD passo-passo (senza Qt)
-│   └── pretrained/          # modelli addestrati (ppo_adcs_v8.zip, ppo_adcs_v11.zip)
+│   └── pretrained/          # modelli addestrati (ppo_adcs_v8.zip, local_training_v4_seed1@3_best.zip)
 └── tests/
     ├── test_physics.py      # verifica: conservazione e soluzioni analitiche
     └── test_rl_env.py       # ambiente RL e training senza GUI
