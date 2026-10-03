@@ -31,11 +31,21 @@ def pd_action(env: SatAttitudeEnv, pd: QuaternionPDController) -> np.ndarray:
     return np.clip((tau_pd - env._tau) / env.dtau_max, -1.0, 1.0)
 
 
+def null_space_share(proj_range: np.ndarray, omega_w: np.ndarray) -> float:
+    """Quota (0–1) dell'energia cinetica delle ruote nello spazio nullo della piramide,
+    cioè in combinazioni (+,−,+,−) che non producono momento sul corpo: 1 − |P·Ω|²/|Ω|²,
+    con P = A⁺A proiettore sullo spazio immagine di Aᵀ."""
+    n2 = float(omega_w @ omega_w)
+    if n2 < 1e-12:
+        return float("nan")
+    return 1.0 - float((proj_range @ omega_w) @ (proj_range @ omega_w)) / n2
+
+
 def run_episode(env: SatAttitudeEnv, seed: int, policy) -> dict:
     obs, _ = env.reset(seed=seed)
     pd = QuaternionPDController(env.engine.J)
     rng = np.random.default_rng(seed)
-    ret, t_1deg, alpha_max = 0.0, np.nan, 0.0
+    ret, t_1deg, alpha_max, omega_peak = 0.0, np.nan, 0.0, 0.0
     for k in range(env.max_episode_steps):
         if policy == "PD":
             a = pd_action(env, pd)
@@ -48,12 +58,16 @@ def run_episode(env: SatAttitudeEnv, seed: int, policy) -> dict:
         obs, r, terminated, truncated, info = env.step(a)
         ret += r
         alpha_max = max(alpha_max, float(np.abs(info["alpha_deg"]).max()))
+        omega_peak = max(omega_peak, float(np.abs(env.last_tel.wheel_speed).max()))
         if np.isnan(t_1deg) and info["att_err_deg"] < 1.0:
             t_1deg = (k + 1) * env.dt
         if terminated or truncated:
             break
     return dict(ret=ret, err=info["att_err_deg"], t_1deg=t_1deg,
-                alpha_max=alpha_max, energy=float(env.engine.x[-1]))
+                alpha_max=alpha_max, energy=float(env.engine.x[-1]),
+                rpm_peak=omega_peak * 30.0 / np.pi,
+                null_share=null_space_share(env.engine.rw.A_pinv @ env.engine.rw.A,
+                                            env.last_tel.wheel_speed))
 
 
 def evaluate(policy, seeds=EVAL_SEEDS) -> dict:
@@ -72,11 +86,22 @@ def _nanmean(x: np.ndarray) -> float:
 
 def print_table(results: dict):
     print(f"{'':>10} {'reward':>9} {'err fin [°]':>12} {'err max [°]':>12} "
-          f"{'t<1° [s]':>9} {'|α|max':>7} {'energia [J]':>11}")
+          f"{'t<1° [s]':>9} {'|α|max':>7} {'energia [J]':>11} {'Ω picco [RPM]':>14} {'spazio nullo':>13}")
     for name, v in results.items():
         print(f"{name:>10} {v['ret'].mean():>9.1f} {v['err'].mean():>12.4f} "
               f"{v['err'].max():>12.4f} {_nanmean(v['t_1deg']):>9.1f} "
-              f"{v['alpha_max'].mean():>7.1f} {v['energy'].mean():>11.1f}")
+              f"{v['alpha_max'].mean():>7.1f} {v['energy'].mean():>11.1f} "
+              f"{v['rpm_peak'].mean():>8.0f}/{v['rpm_peak'].max():<5.0f} "
+              f"{_nanmean(v['null_share']):>12.0%}")
+
+
+def print_wheel_details(results: dict):
+    """Per seed: picco di |Ω| [RPM] e quota nello spazio nullo a fine episodio."""
+    print("\nRuote per seed (picco RPM / quota spazio nullo a fine episodio):")
+    for name in ("PPO", "PD"):
+        if name in results:
+            v = results[name]
+            print(f"{name:>6} " + "  ".join(f"{p:.0f}/{n:.0%}" for p, n in zip(v["rpm_peak"], v["null_share"])))
 
 
 def main():
@@ -91,6 +116,7 @@ def main():
     for name in ("PD", "libero", "casuale"):
         results[name] = evaluate(name)
     print_table(results)
+    print_wheel_details(results)
 
     if a.model:
         ppo, pd = results["PPO"], results["PD"]

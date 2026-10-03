@@ -140,3 +140,15 @@ def test_old_models_still_load():
     """Il modello v8 (osservazione senza ruote) viene associato all'ambiente giusto."""
     from rl.models import env_kwargs_for, load_model
     assert env_kwargs_for(load_model("rl/pretrained/ppo_adcs_v8")) == {"wheel_speed_obs": False}
+
+
+def test_null_space_share():
+    from rl.evaluate import null_space_share
+    env = SatAttitudeEnv()
+    rw = env.engine.rw
+    P = rw.A_pinv @ rw.A
+    null_dir = np.linalg.svd(rw.A)[2][-1]                 # direzione nello spazio nullo
+    range_dir = rw.A_pinv @ np.array([0.0, 0.0, 1.0])     # direzione che produce momento
+    assert null_space_share(P, 100 * null_dir) > 0.999
+    assert null_space_share(P, 100 * range_dir) < 1e-6
+    assert np.isnan(null_space_share(P, np.zeros(4)))

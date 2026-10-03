@@ -543,3 +543,9 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 - **Baseline PD con la nuova reward:** −43.0 (era −42.9). Il modello v8, che non osserva le ruote, scende a −127.4: conferma che la penalità è attiva sul suo comportamento.
 - Test: `test_wheel_speed_penalty` (19 test, tutti passati). Nessun cambio di osservazione: il formato a 14 valori è quello della v9.
 - **Da fare:** training da zero 2 M passi (`python -m rl.train --subproc`), poi `rl.evaluate` sul modello `_best`. Se l'errore finale peggiora, ridurre `k_wheel` (0.02) o alzare la soglia; se le ruote superano ancora ~0.5, alzare `k_wheel`.
+
+### 2026-10-03 — `rl.evaluate`: picco e spazio nullo delle ruote
+- **Risultato v10 (reward `k_wheel = 0.05`, soglia 0.3; training locale `local_training_v3`):** reward −67.9 vs PD −43.0, errore finale 0.0011°, t<1° 14.4 s (PD 12.2), |α| max 15.5, energia 67.8 J. La manovra è più lenta e la reward peggiora rispetto a v8/v9: da capire se la penalità limita la manovra o se è variabilità del training.
+- **Modifica (solo metrica, nessun effetto sul training):** `rl.evaluate` stampa due colonne in più, il picco di |Ω| in RPM (media/max sui seed) e la quota di energia cinetica delle ruote nello spazio nullo a fine episodio, `1 − |A⁺AΩ|²/|Ω|²`. Sotto la tabella c'è il dettaglio per seed per PPO e PD.
+- Verifica sul v8: PPO picco 1941–6000 RPM e 83–100 % nello spazio nullo; PD 659–2378 RPM e 0–1 %. Coincide con i valori del registro del 2026-10-01.
+- Test: `test_null_space_share` (20 test).
