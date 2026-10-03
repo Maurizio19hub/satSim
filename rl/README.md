@@ -598,3 +598,22 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 ### 2026-10-03 — Correzione: validazione con `--resume`
 - **Bug:** nel callback della validazione il primo controllo era a `eval_every` passi assoluti (100 k). Con `--resume` il contatore parte dai passi già fatti (es. 2 M), quindi all'avvio la validazione veniva ripetuta ~20 volte di fila sullo stesso modello (~8 min persi). I risultati del training non erano alterati.
 - **Correzione:** in `_on_training_start` la prima validazione è fissata a `passi già fatti + eval_every`. Test `test_validation_schedule_after_resume` (21 test).
+
+### 2026-10-03 — v11: ripresa del seed 1 da 2 M a 4 M passi
+- `--resume local_training_v4_seed1 --timesteps 2000000 --seed 3` (learning rate da 1.5e-4 a 0). In validazione la reward migliora subito (−25 → −20 dopo 100 k passi).
+- Test (seed 100–109), modello migliore (`local_training_v4_seed1@3_best`):
+
+  | | v11 seed 1 (2 M) | **v11 seed 1 → 4 M** | PD |
+  |---|---|---|---|
+  | Reward | −32.7 | **−28.2** | −43.2 |
+  | Errore finale | 0.0006° | **0.0004°** | 0.0031° |
+  | t<1° | 10.8 s | **10.4 s** | 12.2 s |
+  | \|α\| max | 16.3 | 18.0 | 6.2 |
+  | Energia | 67.2 J | **65.8 J** | 61.3 J |
+  | Picco ruote medio / max | 3161 / 5317 RPM | 2604 / 5945 RPM | 1250 / 2378 RPM |
+  | Quota nello spazio nullo | 1 % | **0 %** | 0 % |
+
+  - **`[OK]` reward ≥ PD; `[OK]` errore finale ≤ 0.01° su tutti i seed.** Migliore modello finora.
+  - Peggiorano |α| max (18.0 °/s²) e il picco massimo: 5945 RPM sul seed di test 105 (99 % di Ω_max). Non è deriva (spazio nullo 0 %) ma momento usato per la manovra; il margine contro la saturazione è però nullo.
+  - Proposto come nuovo modello di riferimento (`rl/pretrained/ppo_adcs_v11.zip`, da pubblicare).
+  - Prossimi punti: accelerazioni, margine di saturazione delle ruote (limite sul momento totale), energia.
