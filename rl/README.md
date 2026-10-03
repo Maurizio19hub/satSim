@@ -2,10 +2,10 @@
 
 Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nel [README principale](../README.md).
 
-**Stato:** v10 dell'ambiente (ramo `claude/rl-v10-wheel-penalty`, da testare in locale).
+**Stato:** v11 dell'ambiente (ramo `claude/rl-v10-wheel-penalty`, da addestrare e testare in locale).
 - **Azione:** variazione di coppia delle ruote.
 - **Osservazione:** errore d'assetto in scala logaritmica + velocità angolare + coppia corrente + velocità delle ruote.
-- **Reward:** − errore d'assetto (lineare + logaritmica) − accelerazioni oltre soglia − velocità delle ruote oltre soglia + bonus sotto 0.1° e 0.01°.
+- **Reward:** − errore d'assetto (lineare + logaritmica) − accelerazioni oltre soglia − velocità delle ruote nello spazio nullo + bonus sotto 0.1° e 0.01°.
 - **Modello di riferimento:** v8, in `rl/pretrained/`. Il modello v9 è ancora da addestrare.
 - Il dettaglio di ogni versione è nel registro (§9).
 
@@ -127,9 +127,12 @@ $$
 | $\alpha_{max}$ | soglia di accelerazione per asse | `alpha_max_deg = 2.0` °/s² (confermato) |
 | $k_{acc}$ | penalità per °/s² oltre soglia | `k_accel = 0.01` |
 | $\Omega_j/\Omega_{max}$ | velocità della ruota j, frazione di 6000 RPM | — |
-| $thr$, $k_{wheel}$ | soglia e peso della penalità sulle ruote (v10) | `wheel_speed_thr = 0.3`, `k_wheel = 0.05` |
+| $k_{null}$ | peso della penalità sulla deriva nello spazio nullo (v11) | `k_null = 0.1` |
 
-Dalla v10 la reward ha un terzo termine, $-\,k_{wheel}\sum_j \max(0,\ |\Omega_j|/\Omega_{max} - thr)$, nullo sotto soglia.
+Dalla v11 la reward ha un terzo termine, $-\,k_{null}\,\dfrac{|(I - A^+A)\,\boldsymbol\Omega|}{\sqrt N\,\Omega_{max}}$.
+- $(I - A^+A)$ proietta le velocità delle ruote sullo spazio nullo della piramide: la combinazione $(-,+,-,+)/2$, che non produce momento sul corpo.
+- Diviso per $\sqrt N$ il termine vale la velocità di deriva di ciascuna ruota in frazione di $\Omega_{max}$ (tutte le componenti del vettore nullo hanno modulo 1/2): 0.5 = 3000 RPM di deriva su ogni ruota, penalità 0.05 per passo.
+- La velocità utile alla manovra (spazio immagine) non è penalizzata. Il PD, che alloca con la pseudo-inversa, ha deriva nulla per costruzione.
 
 **Termine d'errore.** Penalità lineare e sempre attiva: a 60° vale −0.6 per passo, a 1° vale −0.01. La reward è sempre ≤ 0 e il massimo (0) si ha solo sul target. Sull'episodio la penalità è proporzionale all'area sotto la curva θ(t). Quindi premia sia l'**arrivare presto** sia il **restare** sul target: è il motivo per cui ha sostituito il termine differenziale della v1 (§ limiti della v1).
 
@@ -549,3 +552,12 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 - **Modifica (solo metrica, nessun effetto sul training):** `rl.evaluate` stampa due colonne in più, il picco di |Ω| in RPM (media/max sui seed) e la quota di energia cinetica delle ruote nello spazio nullo a fine episodio, `1 − |A⁺AΩ|²/|Ω|²`. Sotto la tabella c'è il dettaglio per seed per PPO e PD.
 - Verifica sul v8: PPO picco 1941–6000 RPM e 83–100 % nello spazio nullo; PD 659–2378 RPM e 0–1 %. Coincide con i valori del registro del 2026-10-01.
 - Test: `test_null_space_share` (20 test).
+
+### 2026-10-03 — v11: penalità sulla deriva nello spazio nullo (sostituisce la v10)
+- **Analisi del v10 con le nuove metriche** (`local_training_v3`): picco medio 3116 RPM (max 5333), quota nello spazio nullo 71 % (v8: 3879 RPM, 97 %; PD: 1250 RPM, 0 %). 9 seed su 10 sopra la soglia di 1800 RPM.
+  - La penalità sulla velocità totale ha ridotto la deriva solo in parte e ha reso la manovra più lenta (14.4 s).
+  - Mescola due cose diverse: la velocità utile alla manovra (spazio immagine di A) e la deriva inutile (spazio nullo). La seconda è quella da eliminare, e si può eliminare senza toccare l'assetto: una coppia lungo (+,−,+,−) ferma la deriva senza agire sul corpo.
+- **Modifica:** il termine v10 `−k_wheel · Σ max(0, |Ω_j|/Ω_max − 0.3)` è sostituito da `−k_null · |(I − A⁺A)Ω| / (√N·Ω_max)`, con `k_null = 0.1` (§5). Nessuna soglia: il PD ha deriva nulla. `wheel_speed_thr` e `k_wheel` rimossi. Osservazione invariata (14 valori, v9).
+- **Baseline con la nuova reward:** PD −43.2 (v10: −43.0). Il modello v8 scende a −131.9 (~104 punti persi per la deriva).
+- Test: `test_null_space_penalty` sostituisce `test_wheel_speed_penalty` (20 test).
+- **Da fare:** training da zero 2 M passi, poi `rl.evaluate`. Atteso: quota nello spazio nullo vicina a 0 % senza peggiorare t<1°. Se la manovra rallenta ancora, ridurre `k_null`; se la deriva resta sopra ~20 %, aumentarlo.

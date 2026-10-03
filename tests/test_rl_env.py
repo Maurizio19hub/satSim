@@ -61,20 +61,26 @@ def test_reward_is_bonus_on_target_at_rest():
     assert abs(r - (c["bonus"] + c["bonus2"])) < 1e-3
 
 
-def test_wheel_speed_penalty():
+def test_null_space_penalty():
     from types import SimpleNamespace
     env = SatAttitudeEnv()
     env.reset(seed=0)
     c = env.reward_config
-    base = dict(att_err_deg=0.0)
-    slow = SimpleNamespace(**base, wheel_speed=np.full(4, 0.2 * env.omega_w_max))
-    fast = SimpleNamespace(**base, wheel_speed=np.array([0.8, -1.0, 0.0, 0.1]) * env.omega_w_max)
+    rw = env.engine.rw
+    null_dir = np.linalg.svd(rw.A)[2][-1]                 # (±1/2, ...): combinazione (+,−,+,−)
+    range_dir = rw.A_pinv @ np.array([0.0, 0.0, 1.0])
+    range_dir /= np.abs(range_dir).max()
     a = np.zeros(4)
-    assert env._compute_reward(slow, a) == env._compute_reward(
-        SimpleNamespace(**base, wheel_speed=np.zeros(4)), a)       # sotto soglia: nessun effetto
-    expected = c["k_wheel"] * ((0.8 - c["wheel_speed_thr"]) + (1.0 - c["wheel_speed_thr"]))
-    d = env._compute_reward(slow, a) - env._compute_reward(fast, a)
-    assert abs(d - expected) < 1e-9
+
+    def r(w):
+        return env._compute_reward(SimpleNamespace(att_err_deg=0.0, wheel_speed=w), a)
+
+    r0 = r(np.zeros(4))
+    assert abs(r(0.9 * env.omega_w_max * range_dir) - r0) < 1e-9     # velocità utile: nessuna penalità
+    drift = 0.5                                                       # ogni ruota a 0.5·Ω_max di deriva
+    w = 2 * drift * env.omega_w_max * null_dir
+    np.testing.assert_allclose(np.abs(w) / env.omega_w_max, drift)
+    assert abs((r0 - r(w)) - c["k_null"] * drift) < 1e-9
 
 
 def test_log_attitude_error():

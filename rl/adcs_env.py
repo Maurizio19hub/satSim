@@ -44,8 +44,7 @@ REWARD_CONFIG = dict(
     bonus_theta_deg=0.1,    # soglia d'errore per il bonus [°]
     bonus2=0.02,            # secondo bonus (precisione), si somma al primo
     bonus2_theta_deg=0.01,  # soglia d'errore per il secondo bonus [°]
-    wheel_speed_thr=0.3,    # soglia di velocità delle ruote, frazione di Ω_max (il PD sta sotto 0.4)
-    k_wheel=0.05,           # penalità per ogni unità di |Ω|/Ω_max oltre soglia, per ruota
+    k_null=0.1,             # penalità sulla velocità delle ruote nello spazio nullo (frazione di Ω_max)
 )
 
 
@@ -96,6 +95,8 @@ class SatAttitudeEnv(gym.Env):
 
         self.wheel_speed_obs = wheel_speed_obs
         self.omega_w_max = self.engine.rw.omega_max          # [rad/s] (6000 RPM)
+        rw = self.engine.rw
+        self.null_proj = np.eye(self.n_wheels) - rw.A_pinv @ rw.A   # proiettore sullo spazio nullo di A
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_wheels,), dtype=np.float32)
         n_obs = 6 + self.n_wheels * (2 if wheel_speed_obs else 1)
@@ -152,7 +153,7 @@ class SatAttitudeEnv(gym.Env):
 
             r = − k_err · θ − k_log · ln(1 + θ/θ0)              [θ in gradi]
                 − k_accel · Σ_assi max(0, |α_i| − α_max)        [α in °/s²]
-                − k_wheel · Σ_ruote max(0, |Ω_j|/Ω_max − thr)    [Ω_max = 6000 RPM]
+                − k_null · |Ω_null| / (√N · Ω_max)                 [Ω_max = 6000 RPM]
                 + bonus · [θ < θ_bonus] + bonus2 · [θ < θ_bonus2]
 
         Il primo termine penalizza l'errore d'assetto: la parte lineare domina
@@ -161,9 +162,12 @@ class SatAttitudeEnv(gym.Env):
         precisione, anche sotto le soglie dei bonus). Il
         secondo penalizza solo le accelerazioni oltre soglia. I bonus premiano
         ogni passo trascorso vicino al target (0.1°) e molto vicino (0.01°),
-        quindi il restarci con la precisione richiesta. La penalità sulle ruote è
-        nulla sotto soglia: non tocca il regime del PD, ma scoraggia la deriva
-        nello spazio nullo e l'avvicinarsi alla saturazione.
+        quindi il restarci con la precisione richiesta. L'ultimo termine penalizza
+        solo la parte di velocità delle ruote nello spazio nullo della piramide,
+        Ω_null = (I − A⁺A)·Ω, cioè le combinazioni (+,−,+,−) che non producono
+        momento sul corpo: non limita la velocità utile alla manovra. Diviso per
+        √N vale la velocità di deriva di ogni ruota (le componenti del vettore
+        nullo hanno tutte modulo 1/2), in [0, 1].
         """
         c = self.reward_config
         alpha_deg = np.degrees(np.abs(self._alpha))
@@ -171,11 +175,11 @@ class SatAttitudeEnv(gym.Env):
         theta = tel.att_err_deg
         bonus = (c["bonus"] * (theta < c["bonus_theta_deg"])
                  + c["bonus2"] * (theta < c["bonus2_theta_deg"]))
-        wheel_excess = np.maximum(0.0, np.abs(tel.wheel_speed) / self.omega_w_max
-                                  - c["wheel_speed_thr"]).sum()
+        null_drift = np.linalg.norm(self.null_proj @ tel.wheel_speed) / (
+            np.sqrt(self.n_wheels) * self.omega_w_max)
         err_pen = c["k_err"] * theta + c["k_log"] * np.log1p(theta / c["log_theta0_deg"])
         return float(-err_pen - c["k_accel"] * accel_excess
-                      - c["k_wheel"] * wheel_excess + bonus)
+                      - c["k_null"] * null_drift + bonus)
 
     def _get_obs(self, tel: Telemetry) -> np.ndarray:
         """Osservazione: errore d'assetto in scala log, ω normalizzata, coppia corrente
