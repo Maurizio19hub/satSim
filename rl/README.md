@@ -561,3 +561,19 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
 - **Baseline con la nuova reward:** PD −43.2 (v10: −43.0). Il modello v8 scende a −131.9 (~104 punti persi per la deriva).
 - Test: `test_null_space_penalty` sostituisce `test_wheel_speed_penalty` (20 test).
 - **Da fare:** training da zero 2 M passi, poi `rl.evaluate`. Atteso: quota nello spazio nullo vicina a 0 % senza peggiorare t<1°. Se la manovra rallenta ancora, ridurre `k_null`; se la deriva resta sopra ~20 %, aumentarlo.
+- **Risultati v11** (training locale `local_training_v4`, 2 M passi, seed di test 100–109):
+
+  | | v8 | v10 | **v11** | PD |
+  |---|---|---|---|---|
+  | Reward | −27.8 (reward v8) | −67.9 | −60.8 | −43.2 |
+  | Errore finale | 0.0003° | 0.0011° | **0.0004°** | 0.0031° |
+  | t<1° | 10.8 s | 14.4 s | 13.6 s | 12.2 s |
+  | \|α\| max | 14.1 | 15.5 | 18.4 | 6.2 |
+  | Energia | 69.1 J | 67.8 J | **63.8 J** | 61.3 J |
+  | Picco ruote medio / max | 3879 / 6000 RPM | 3116 / 5333 | **2059 / 3725** | 1250 / 2378 |
+  | Quota nello spazio nullo | 97 % | 71 % | **5 %** | 0 % |
+
+  - La deriva nello spazio nullo è risolta (0–14 % per seed, nessuna ruota vicina alla saturazione) e l'energia si avvicina a quella del PD. Precisione invariata.
+  - `[--]` reward ≥ PD; `[OK]` errore finale ≤ 0.01°. Manovra più lenta del PD (13.6 vs 12.2 s) e |α| max più alto.
+  - Ipotesi sul distacco, da verificare: coppia contesa tra manovra e correzione della deriva; penalità di deriva accumulata durante la manovra; variabilità del training (anche la v9 era peggiore del v8 a reward invariata).
+  - Prossimo passo proposto: scomposizione della reward per termine in `rl.evaluate`, poi una sola modifica mirata.
