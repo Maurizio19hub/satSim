@@ -158,3 +158,14 @@ def test_null_space_share():
     assert null_space_share(P, 100 * null_dir) > 0.999
     assert null_space_share(P, 100 * range_dir) < 1e-6
     assert np.isnan(null_space_share(P, np.zeros(4)))
+
+
+def test_validation_schedule_after_resume():
+    """Con --resume la prima validazione cade eval_every passi dopo la ripresa."""
+    from pathlib import Path
+    from types import SimpleNamespace
+    from rl.train import BestModelCallback
+    cb = BestModelCallback(100_000, seeds=[200], save_path=Path("unused"))
+    cb.init_callback(SimpleNamespace(num_timesteps=2_000_000))
+    cb.on_training_start({}, {})
+    assert cb.next_eval == 2_100_000

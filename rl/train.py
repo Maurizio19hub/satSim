@@ -68,6 +68,11 @@ class BestModelCallback(BaseCallback):
         self.next_eval = eval_every
         self.best = -np.inf
 
+    def _on_training_start(self) -> None:
+        # Con --resume num_timesteps parte dai passi già fatti: la prima
+        # validazione va eval_every passi dopo, non a eval_every assoluti.
+        self.next_eval = self.num_timesteps + self.eval_every
+
     def _on_step(self) -> bool:
         if self.num_timesteps >= self.next_eval:
             self.next_eval += self.eval_every

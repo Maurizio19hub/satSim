@@ -594,3 +594,7 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - I picchi di velocità restano alti (fino a 5317 RPM, seed di test 103), ma sono momento utile, non deriva (spazio nullo ≤ 2 % su tutti i seed): la manovra è più rapida di quella del PD e richiede più momento. Da qui anche l'energia un po' più alta.
   - Aperti: |α| max ~2.5 volte il PD; margine delle ruote ridotto sui seed con picco alto; variabilità tra training (un terzo seed).
   - In corso: ripresa di `local_training_v4` per altri 2 M passi. Candidato nuovo modello di riferimento: v11 seed 1 (da pubblicare in `rl/pretrained/` su scelta dell'utente).
+
+### 2026-10-03 — Correzione: validazione con `--resume`
+- **Bug:** nel callback della validazione il primo controllo era a `eval_every` passi assoluti (100 k). Con `--resume` il contatore parte dai passi già fatti (es. 2 M), quindi all'avvio la validazione veniva ripetuta ~20 volte di fila sullo stesso modello (~8 min persi). I risultati del training non erano alterati.
+- **Correzione:** in `_on_training_start` la prima validazione è fissata a `passi già fatti + eval_every`. Test `test_validation_schedule_after_resume` (21 test).
