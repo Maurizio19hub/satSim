@@ -577,3 +577,20 @@ Circa metà del tempo è la fisica: ~1.2 ms per passo, con 5 valutazioni delle d
   - `[--]` reward ≥ PD; `[OK]` errore finale ≤ 0.01°. Manovra più lenta del PD (13.6 vs 12.2 s) e |α| max più alto.
   - Ipotesi sul distacco, da verificare: coppia contesa tra manovra e correzione della deriva; penalità di deriva accumulata durante la manovra; variabilità del training (anche la v9 era peggiore del v8 a reward invariata).
   - Prossimo passo proposto: scomposizione della reward per termine in `rl.evaluate`, poi una sola modifica mirata.
+- **Secondo training v11, `--seed 1`** (`local_training_v4_seed1`, stesso codice):
+
+  | | v11 seed 0 | **v11 seed 1** | PD |
+  |---|---|---|---|
+  | Reward | −60.8 | **−32.7** | −43.2 |
+  | Errore finale | 0.0004° | **0.0006°** | 0.0031° |
+  | t<1° | 13.6 s | **10.8 s** | 12.2 s |
+  | \|α\| max | 18.4 | 16.3 | 6.2 |
+  | Energia | 63.8 J | 67.2 J | 61.3 J |
+  | Picco ruote medio / max | 2059 / 3725 RPM | 3161 / 5317 RPM | 1250 / 2378 RPM |
+  | Quota nello spazio nullo | 5 % | **1 %** | 0 % |
+
+  - **`[OK]` reward ≥ PD; `[OK]` errore finale ≤ 0.01° su tutti i seed.** Primo modello che soddisfa entrambi i criteri senza deriva delle ruote.
+  - **Variabilità tra training:** a parità di codice, il seed cambia la reward di 28 punti (−60.8 vs −32.7), più dell'intero distacco dal PD. I confronti tra versioni basati su un solo training (v9 vs v8, v10) non sono conclusivi.
+  - I picchi di velocità restano alti (fino a 5317 RPM, seed di test 103), ma sono momento utile, non deriva (spazio nullo ≤ 2 % su tutti i seed): la manovra è più rapida di quella del PD e richiede più momento. Da qui anche l'energia un po' più alta.
+  - Aperti: |α| max ~2.5 volte il PD; margine delle ruote ridotto sui seed con picco alto; variabilità tra training (un terzo seed).
+  - In corso: ripresa di `local_training_v4` per altri 2 M passi. Candidato nuovo modello di riferimento: v11 seed 1 (da pubblicare in `rl/pretrained/` su scelta dell'utente).
