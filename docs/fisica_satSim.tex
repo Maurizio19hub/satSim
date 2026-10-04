@@ -1,12 +1,12 @@
 % =============================================================================
-%  satSim — Documentazione fisico-matematica del simulatore ADCS
-%  Compilazione:  pdflatex fisica_satSim.tex  (due volte, per indice e riferimenti)
+%  satSim — Physical and mathematical documentation of the ADCS simulator
+%  Build:  pdflatex fisica_satSim.tex  (twice, for the table of contents and references)
 % =============================================================================
 \documentclass[11pt,a4paper]{article}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage[italian]{babel}
+\usepackage[english]{babel}
 \usepackage{lmodern}
 \usepackage{amsmath,amssymb,amsthm,bm}
 \usepackage{geometry}
@@ -22,19 +22,19 @@
 \hypersetup{colorlinks=true, linkcolor=blue!50!black, urlcolor=blue!50!black}
 \setlength{\parskip}{0.4em}
 
-% --- Ambienti ---------------------------------------------------------------
-\newtcolorbox{codice}[1][]{colback=gray!6, colframe=gray!50, fonttitle=\bfseries,
-  title={Nel codice}, #1}
-\newtcolorbox{nota}[1][]{colback=blue!4, colframe=blue!40!black, fonttitle=\bfseries,
+% --- Environments -----------------------------------------------------------
+\newtcolorbox{incode}[1][]{colback=gray!6, colframe=gray!50, fonttitle=\bfseries,
+  title={In the code}, #1}
+\newtcolorbox{note}[1][]{colback=blue!4, colframe=blue!40!black, fonttitle=\bfseries,
   title={#1}}
-\newtcolorbox{miglioramento}{colback=green!5, colframe=green!40!black, fonttitle=\bfseries,
-  title={Possibili miglioramenti}}
-\newtheorem{prop}{Proposizione}
+\newtcolorbox{improvement}{colback=green!5, colframe=green!40!black, fonttitle=\bfseries,
+  title={Possible improvements}}
+\newtheorem{prop}{Proposition}
 
 \lstset{basicstyle=\ttfamily\small, columns=fullflexible, breaklines=true,
   frame=none, backgroundcolor=\color{gray!6}}
 
-% --- Notazione --------------------------------------------------------------
+% --- Notation ---------------------------------------------------------------
 \newcommand{\vect}[1]{\bm{#1}}
 \newcommand{\w}{\vect{\omega}}
 \newcommand{\q}{\vect{q}}
@@ -45,166 +45,166 @@
 \newcommand{\code}[1]{\texttt{#1}}
 
 \title{\textbf{satSim}\\[0.3em]
-\large Modello fisico-matematico del simulatore di controllo d'assetto\\
-per un CubeSat 3U con ruote di reazione}
-\author{Documentazione tecnica --- versione 0.1.0}
+\large Physical and mathematical model of the attitude control simulator\\
+for a 3U CubeSat with reaction wheels}
+\author{Technical documentation --- version 0.1.0}
 \date{\today}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Questo documento descrive in dettaglio la fisica e la matematica implementate
-nel simulatore \emph{satSim}: il modello di corpo rigido del satellite, la
-dinamica delle ruote di reazione e il loro consumo elettrico, le equazioni di
-Eulero con accoppiamento giroscopico, la cinematica dei quaternioni, i modelli
-delle coppie di disturbo ambientali (gradiente di gravità, pressione di
-radiazione solare, coppia magnetica), l'integratore numerico Runge--Kutta del
-quarto ordine e il controllore PD sui quaternioni usato come riferimento.
-Per ogni modello si riportano la derivazione, le ipotesi, gli ordini di
-grandezza, la corrispondenza con il codice e le direzioni di miglioramento.
-L'obiettivo finale del progetto è estrarre dall'engine un ambiente
-\emph{Gymnasium} per addestrare un agente di Reinforcement Learning (PPO/SAC).
+This document describes in detail the physics and mathematics implemented
+in the \emph{satSim} simulator: the rigid-body model of the satellite, the
+dynamics of the reaction wheels and their power consumption, the Euler
+equations with gyroscopic coupling, quaternion kinematics, the models of the
+environmental disturbance torques (gravity gradient, solar radiation
+pressure, magnetic torque), the fourth-order Runge--Kutta numerical
+integrator and the quaternion PD controller used as the baseline.
+For each model the derivation, the assumptions, the orders of magnitude,
+the correspondence with the code and the directions for improvement are given.
+The final goal of the project is to build on the engine a \emph{Gymnasium}
+environment to train a Reinforcement Learning agent (PPO/SAC).
 \end{abstract}
 
 \tableofcontents
 \newpage
 
 % =============================================================================
-\section{Introduzione e principio di funzionamento}
+\section{Introduction and working principle}
 % =============================================================================
 
-\subsection{Il problema del controllo d'assetto}
-L'\emph{assetto} di un satellite è il suo orientamento nello spazio rispetto a
-un sistema di riferimento. Il sottosistema ADCS (\emph{Attitude Determination
-and Control System}) deve misurare l'assetto e portarlo/mantenerlo su un valore
-desiderato (\emph{target}), ad esempio per puntare un'antenna, una camera o i
-pannelli solari.
+\subsection{The attitude control problem}
+The \emph{attitude} of a satellite is its orientation in space relative to
+a reference frame. The ADCS subsystem (\emph{Attitude Determination
+and Control System}) has to measure the attitude and bring it to / keep it at a
+desired value (\emph{target}), for example to point an antenna, a camera or the
+solar panels.
 
-Nello spazio non esiste un ``appoggio'' contro cui spingere: per ruotare il
-satellite occorre o espellere massa (propulsori), o interagire con un campo
-esterno (magnetorquer), oppure \textbf{scambiare momento angolare} con parti
-mobili interne. Le \emph{ruote di reazione} appartengono all'ultima categoria.
+In space there is nothing to ``push against'': to rotate the satellite one
+must either expel mass (thrusters), interact with an external field
+(magnetorquers), or \textbf{exchange angular momentum} with internal moving
+parts. \emph{Reaction wheels} belong to the last category.
 
-\subsection{Principio fisico delle ruote di reazione}
-Una ruota di reazione è un volano azionato da un motore elettrico brushless
-solidale alla struttura. Se il motore applica al rotore una coppia $T_{rw}$,
-per il terzo principio della dinamica il rotore applica alla struttura la
-coppia $-T_{rw}$. Il sistema complessivo (corpo + ruote), in assenza di coppie
-esterne, conserva il momento angolare totale:
+\subsection{Physical principle of reaction wheels}
+A reaction wheel is a flywheel driven by a brushless electric motor fixed to
+the structure. If the motor applies a torque $T_{rw}$ to the rotor, by Newton's
+third law the rotor applies the torque $-T_{rw}$ to the structure. The whole
+system (body + wheels), in the absence of external torques, conserves its total
+angular momentum:
 \begin{equation}
-  \vect{H} = \underbrace{J\,\w}_{\text{corpo}} + \underbrace{\h}_{\text{ruote}},
+  \vect{H} = \underbrace{J\,\w}_{\text{body}} + \underbrace{\h}_{\text{wheels}},
   \qquad
-  \left.\frac{d\vect{H}}{dt}\right|_{\mathcal{I}} = \T_{est}.
+  \left.\frac{d\vect{H}}{dt}\right|_{\mathcal{I}} = \T_{ext}.
   \label{eq:Htot}
 \end{equation}
-Accelerare una ruota in un verso fa quindi ruotare il corpo nel verso opposto:
-il momento angolare viene \emph{trasferito}, non creato. Ne seguono due
-conseguenze fondamentali, che l'agente RL dovrà imparare a gestire:
+Spinning up a wheel in one direction therefore rotates the body in the opposite
+direction: angular momentum is \emph{transferred}, not created. Two fundamental
+consequences follow, which the RL agent has to learn to manage:
 \begin{enumerate}[nosep]
-  \item le ruote possono solo \emph{ridistribuire} momento angolare; le coppie
-        esterne di disturbo invece lo \emph{aggiungono} al sistema;
-  \item il momento accumulato fa crescere la velocità delle ruote fino al
-        limite fisico (\textbf{saturazione}); da lì in poi il controllo
-        sull'asse corrispondente è perso finché la ruota non viene
-        ``scaricata'' con un attuatore esterno (\emph{momentum dumping}).
+  \item the wheels can only \emph{redistribute} angular momentum; external
+        disturbance torques instead \emph{add} it to the system;
+  \item the accumulated momentum makes the wheel speeds grow up to the
+        physical limit (\textbf{saturation}); from then on control of the
+        corresponding axis is lost until the wheel is ``unloaded'' with an
+        external actuator (\emph{momentum dumping}).
 \end{enumerate}
 
-\subsection{Il sistema di equazioni risolto}
-Il simulatore integra numericamente un sistema di equazioni differenziali
-ordinarie non lineari
+\subsection{The system of equations solved}
+The simulator numerically integrates a system of nonlinear ordinary
+differential equations
 \begin{equation}
   \dot{\vect{x}} = f(t,\vect{x},\vect{u}),\qquad
   \vect{x} = \big[\,\q^T,\ \w^T,\ \vect{\Omega}^T,\ E\,\big]^T \in \mathbb{R}^{7+N+1},
-  \label{eq:stato}
+  \label{eq:state}
 \end{equation}
-dove $\q\in\mathbb{R}^4$ è il quaternione d'assetto, $\w\in\mathbb{R}^3$ la
-velocità angolare del corpo, $\vect\Omega\in\mathbb{R}^N$ le velocità delle $N$
-ruote, $E$ l'energia elettrica consumata e $\vect{u}\in\mathbb{R}^N$ il vettore
-delle coppie motore comandate alle ruote. Le cinque ``equazioni'' del modello
-sono:
+where $\q\in\mathbb{R}^4$ is the attitude quaternion, $\w\in\mathbb{R}^3$ the
+angular velocity of the body, $\vect\Omega\in\mathbb{R}^N$ the speeds of the $N$
+wheels, $E$ the electrical energy consumed and $\vect{u}\in\mathbb{R}^N$ the
+vector of motor torques commanded to the wheels. The five ``equations'' of the
+model are:
 \begin{center}
 \begin{tabular}{cll}
 \toprule
-\# & Contenuto & Sezione\\
+\# & Content & Section\\
 \midrule
-1 & Matrice d'inerzia $J$ del CubeSat 3U & \S\ref{sec:inerzia}\\
-2 & Dinamica ruote $\dot\Omega = T_{rw}/I_{rw}$, saturazione, potenza & \S\ref{sec:ruote}\\
-3 & Equazioni di Eulero con accoppiamento giroscopico & \S\ref{sec:eulero}\\
-4 & Cinematica dei quaternioni & \S\ref{sec:quat}\\
-5 & Coppie di disturbo ambientali & \S\ref{sec:disturbi}\\
+1 & Inertia matrix $J$ of the 3U CubeSat & \S\ref{sec:inertia}\\
+2 & Wheel dynamics $\dot\Omega = T_{rw}/I_{rw}$, saturation, power & \S\ref{sec:wheels}\\
+3 & Euler equations with gyroscopic coupling & \S\ref{sec:euler}\\
+4 & Quaternion kinematics & \S\ref{sec:quat}\\
+5 & Environmental disturbance torques & \S\ref{sec:disturbances}\\
 \bottomrule
 \end{tabular}
 \end{center}
 
 % =============================================================================
-\section{Sistemi di riferimento e notazione}\label{sec:rif}
+\section{Reference frames and notation}\label{sec:frames}
 % =============================================================================
 
-\subsection{Sistemi di riferimento}
+\subsection{Reference frames}
 \begin{itemize}
-  \item \textbf{Inerziale} $\mathcal{I}$: riferimento geocentrico ECI (\emph{Earth
-        Centered Inertial}), con $z_I$ lungo l'asse polare terrestre. Nel
-        simulatore coincide anche con l'\textbf{assetto target} (quaternione
-        identità): il controllore cerca di allineare gli assi del satellite a
-        quelli di $\mathcal{I}$.
-  \item \textbf{Body} $\mathcal{B}$: solidale al satellite, origine nel centro di
-        massa, assi paralleli agli spigoli del parallelepipedo; $z_B$ è l'asse
-        lungo (30 cm).
+  \item \textbf{Inertial} $\mathcal{I}$: geocentric ECI frame (\emph{Earth
+        Centered Inertial}), with $z_I$ along the Earth's polar axis. In the
+        simulator it also coincides with the \textbf{target attitude} (identity
+        quaternion): the controller tries to align the satellite axes with
+        those of $\mathcal{I}$.
+  \item \textbf{Body} $\mathcal{B}$: attached to the satellite, origin at the
+        centre of mass, axes parallel to the edges of the box; $z_B$ is the
+        long axis (30 cm).
 \end{itemize}
 
-\subsection{Notazione}
+\subsection{Notation}
 \begin{center}
 \begin{tabular}{>{$}l<{$}l}
 \toprule
-\text{Simbolo} & Significato\\
+\text{Symbol} & Meaning\\
 \midrule
-\q = [q_0, q_1, q_2, q_3]^T & quaternione unitario, parte scalare $q_0$ per prima\\
-\q_v = [q_1,q_2,q_3]^T & parte vettoriale del quaternione\\
-R(\q) & matrice di rotazione $\mathcal{B}\to\mathcal{I}$: $\vect{v}_I = R(\q)\,\vect{v}_B$\\
-\w & velocità angolare di $\mathcal{B}$ rispetto a $\mathcal{I}$, espressa in $\mathcal{B}$ [rad/s]\\
-J & tensore d'inerzia del satellite in $\mathcal{B}$ [kg\,m$^2$]\\
-\Omega_i & velocità assiale della ruota $i$ [rad/s]\\
-A\in\mathbb{R}^{3\times N} & matrice di distribuzione: colonna $i$ = asse della ruota $i$ in $\mathcal{B}$\\
-\skewm{\vect{a}} & matrice antisimmetrica tale che $\skewm{\vect a}\vect b = \vect a\times\vect b$\\
+\q = [q_0, q_1, q_2, q_3]^T & unit quaternion, scalar part $q_0$ first\\
+\q_v = [q_1,q_2,q_3]^T & vector part of the quaternion\\
+R(\q) & rotation matrix $\mathcal{B}\to\mathcal{I}$: $\vect{v}_I = R(\q)\,\vect{v}_B$\\
+\w & angular velocity of $\mathcal{B}$ relative to $\mathcal{I}$, expressed in $\mathcal{B}$ [rad/s]\\
+J & inertia tensor of the satellite in $\mathcal{B}$ [kg\,m$^2$]\\
+\Omega_i & axial speed of wheel $i$ [rad/s]\\
+A\in\mathbb{R}^{3\times N} & distribution matrix: column $i$ = axis of wheel $i$ in $\mathcal{B}$\\
+\skewm{\vect{a}} & skew-symmetric matrix such that $\skewm{\vect a}\vect b = \vect a\times\vect b$\\
 \bottomrule
 \end{tabular}
 \end{center}
-Tutte le grandezze sono in unità SI, salvo le velocità delle ruote mostrate in
-RPM nella GUI ($1\ \text{RPM} = 2\pi/60$ rad/s).
+All quantities are in SI units, except the wheel speeds shown in RPM in the
+GUI ($1\ \text{RPM} = 2\pi/60$ rad/s).
 
 % =============================================================================
-\section{Equazione 1 --- Matrice d'inerzia}\label{sec:inerzia}
+\section{Equation 1 --- Inertia matrix}\label{sec:inertia}
 % =============================================================================
 
-\subsection{Definizione}
-Il tensore d'inerzia di un corpo rigido rispetto al suo centro di massa è
+\subsection{Definition}
+The inertia tensor of a rigid body about its centre of mass is
 \begin{equation}
   J = \int_V \left(\norm{\vect\rho}^2 I_3 - \vect\rho\,\vect\rho^T\right) dm,
 \end{equation}
-dove $\vect\rho$ è la posizione dell'elemento di massa $dm$. Gli elementi
-diagonali sono i \emph{momenti d'inerzia}, quelli fuori diagonale i
-\emph{prodotti d'inerzia} (con segno negativo: $J_{xy} = -\int xy\,dm$). $J$ è
-simmetrica e definita positiva; i suoi autovettori sono gli \emph{assi
-principali d'inerzia}.
+where $\vect\rho$ is the position of the mass element $dm$. The diagonal
+elements are the \emph{moments of inertia}, the off-diagonal ones the
+\emph{products of inertia} (with a negative sign: $J_{xy} = -\int xy\,dm$). $J$ is
+symmetric and positive definite; its eigenvectors are the \emph{principal
+axes of inertia}.
 
-\subsection{CubeSat 3U come parallelepipedo omogeneo}
-Per un parallelepipedo omogeneo di massa $m$ e lati $a,b,c$ lungo $x,y,z$,
-l'integrale fornisce
+\subsection{3U CubeSat as a homogeneous box}
+For a homogeneous box of mass $m$ and sides $a,b,c$ along $x,y,z$,
+the integral gives
 \begin{equation}
   J_{xx}=\frac{m}{12}(b^2+c^2),\qquad
   J_{yy}=\frac{m}{12}(a^2+c^2),\qquad
   J_{zz}=\frac{m}{12}(a^2+b^2).
 \end{equation}
-Con $m=3$ kg e $a\times b\times c = 0.1\times0.1\times0.3$ m:
-$J_{xx}=J_{yy}=0.025$ kg\,m$^2$, $J_{zz}=0.005$ kg\,m$^2$. Il satellite è
-\emph{prolato}: l'asse $z_B$ è quello di minima inerzia (cinque volte più
-``facile'' da ruotare degli altri).
+With $m=3$ kg and $a\times b\times c = 0.1\times0.1\times0.3$ m:
+$J_{xx}=J_{yy}=0.025$ kg\,m$^2$, $J_{zz}=0.005$ kg\,m$^2$. The satellite is
+\emph{prolate}: the $z_B$ axis has the minimum inertia (five times ``easier''
+to rotate than the others).
 
-\subsection{Prodotti d'inerzia}
-Un satellite reale non è omogeneo (batterie, schede, payload), quindi gli assi
-geometrici non coincidono esattamente con quelli principali. Si introducono
-piccoli prodotti d'inerzia:
+\subsection{Products of inertia}
+A real satellite is not homogeneous (batteries, boards, payload), so the
+geometric axes do not exactly coincide with the principal ones. Small
+products of inertia are introduced:
 \begin{equation}
 J=\begin{bmatrix}
 0.025 & 2\cdot10^{-5} & -1\cdot10^{-5}\\
@@ -212,241 +212,240 @@ J=\begin{bmatrix}
 -1\cdot10^{-5} & 1.5\cdot10^{-5} & 0.005
 \end{bmatrix}\ \text{kg\,m}^2 .
 \end{equation}
-Essi generano accoppiamento fra gli assi: una coppia su $x$ produce anche una
-(piccolissima) accelerazione su $y$ e $z$. Il codice verifica che tutti gli
-autovalori siano positivi.
+They create coupling between the axes: a torque about $x$ also produces a
+(very small) acceleration about $y$ and $z$. The code checks that all
+eigenvalues are positive.
 
-\begin{codice}
-\code{physics\_engine.cubesat\_inertia(mass, size, products)}. $J^{-1}$ viene
-calcolata una volta sola nel costruttore di \code{SatelliteEngine}, perché $J$
-è costante.
-\end{codice}
+\begin{incode}
+\code{physics\_engine.cubesat\_inertia(mass, size, products)}. $J^{-1}$ is
+computed only once in the constructor of \code{SatelliteEngine}, because $J$
+is constant.
+\end{incode}
 
-\begin{miglioramento}
+\begin{improvement}
 \begin{itemize}[nosep]
-  \item Costruire $J$ come somma di componenti (struttura, batterie, ruote,
-        payload) con il teorema di Huygens--Steiner:
+  \item Build $J$ as the sum of components (structure, batteries, wheels,
+        payload) with the parallel axis (Huygens--Steiner) theorem:
         $J = \sum_k \left[J_k + m_k(\norm{\vect d_k}^2 I_3 - \vect d_k\vect d_k^T)\right]$.
-  \item Sottrarre esplicitamente l'inerzia assiale delle ruote,
-        $J_{corpo} = J_{tot} - I_{rw}\sum_i \vect a_i\vect a_i^T$ (vedi \S\ref{sec:ruote-nota}).
-  \item Randomizzare $J$ ($\pm 10\%$) durante l'addestramento RL
-        (\emph{domain randomization}) per ottenere una policy robusta.
-  \item Pannelli solari dispiegabili: $J$ molto più grande e non più
-        ``prolata''; eventualmente appendici flessibili.
+  \item Explicitly subtract the axial inertia of the wheels,
+        $J_{body} = J_{tot} - I_{rw}\sum_i \vect a_i\vect a_i^T$ (see \S\ref{sec:wheels-note}).
+  \item Randomise $J$ ($\pm 10\%$) during RL training
+        (\emph{domain randomization}) to obtain a robust policy.
+  \item Deployable solar panels: a much larger $J$, no longer
+        ``prolate''; possibly flexible appendages.
 \end{itemize}
-\end{miglioramento}
+\end{improvement}
 
 % =============================================================================
-\section{Equazione 2 --- Ruote di reazione}\label{sec:ruote}
+\section{Equation 2 --- Reaction wheels}\label{sec:wheels}
 % =============================================================================
 
-\subsection{Dinamica assiale}
-Ogni ruota è un rotore assialsimmetrico con momento d'inerzia assiale
-$I_{rw}$. La seconda equazione cardinale lungo l'asse di rotazione dà
+\subsection{Axial dynamics}
+Each wheel is an axisymmetric rotor with axial moment of inertia
+$I_{rw}$. The angular momentum balance along the spin axis gives
 \begin{equation}
   I_{rw}\,\dot\Omega_i = T_{rw,i}
   \qquad\Longleftrightarrow\qquad
   \frac{d\Omega_i}{dt} = \frac{T_{rw,i}}{I_{rw}}.
   \label{eq:rw}
 \end{equation}
-Il momento angolare dell'array, espresso in $\mathcal{B}$, e la coppia di
-reazione sul corpo sono
+The angular momentum of the array, expressed in $\mathcal{B}$, and the reaction
+torque on the body are
 \begin{equation}
   \h = A\,I_{rw}\,\vect\Omega,
   \qquad
-  \T_{rw,azione} = -A\,\vect{T}_{rw}.
+  \T_{rw,action} = -A\,\vect{T}_{rw}.
   \label{eq:hrw}
 \end{equation}
 
-\subsection{Nota sulla definizione di $\Omega$}\label{sec:ruote-nota}
-Nell'equazione~\eqref{eq:rw} $\Omega_i$ va interpretata come velocità
-\emph{assoluta} (inerziale) del rotore attorno al proprio asse. Con questa
-scelta \eqref{eq:rw} è esatta per un rotore simmetrico e il momento angolare
-totale \eqref{eq:Htot} si conserva esattamente (si veda la
-Proposizione~\ref{prop:H}). La velocità misurata da un encoder sarebbe quella
-\emph{relativa}, $\Omega_i^{rel} = \Omega_i - \vect a_i^T\w$; la differenza
-($\sim10^{-2}$ rad/s contro $\sim10^2$ rad/s) è trascurabile per la
-visualizzazione ma andrebbe considerata se si modellano sensori reali.
+\subsection{Note on the definition of $\Omega$}\label{sec:wheels-note}
+In equation~\eqref{eq:rw} $\Omega_i$ must be interpreted as the \emph{absolute}
+(inertial) speed of the rotor about its own axis. With this choice
+\eqref{eq:rw} is exact for a symmetric rotor and the total angular momentum
+\eqref{eq:Htot} is conserved exactly (see
+Proposition~\ref{prop:H}). The speed measured by an encoder would be the
+\emph{relative} one, $\Omega_i^{rel} = \Omega_i - \vect a_i^T\w$; the difference
+($\sim10^{-2}$ rad/s against $\sim10^2$ rad/s) is negligible for
+visualisation but should be considered when modelling real sensors.
 
-\subsection{Configurazioni geometriche}
+\subsection{Geometric configurations}
 \begin{itemize}
-  \item \textbf{Ortogonale} (3 ruote): $A = I_3$. Ogni ruota controlla un asse.
-  \item \textbf{Piramidale} (4 ruote, default): gli assi sono inclinati di
-        $\beta$ rispetto a $z_B$ e distribuiti in azimut
+  \item \textbf{Orthogonal} (3 wheels): $A = I_3$. Each wheel controls one axis.
+  \item \textbf{Pyramid} (4 wheels, default): the axes are tilted by
+        $\beta$ from $z_B$ and distributed in azimuth
         $\varphi_i\in\{45^\circ,135^\circ,225^\circ,315^\circ\}$:
         \begin{equation}
           \vect a_i = [\sin\beta\cos\varphi_i,\ \sin\beta\sin\varphi_i,\ \cos\beta]^T,
           \qquad \beta = 54.74^\circ = \arccos(1/\sqrt3).
         \end{equation}
-        Con questo $\beta$ la capacità di coppia/momento è la stessa sui tre
-        assi. La configurazione è \emph{ridondante}: con una ruota guasta le
-        altre tre hanno ancora rango 3.
+        With this $\beta$ the torque/momentum capacity is the same on the three
+        axes. The configuration is \emph{redundant}: with one failed wheel the
+        other three still have rank 3.
 \end{itemize}
 
-\subsection{Allocazione della coppia}
-Il controllore produce una coppia desiderata sul corpo $\T_{cmd}\in\mathbb{R}^3$.
-Occorre trovare $\vect T_{rw}\in\mathbb{R}^N$ tale che $-A\vect T_{rw}=\T_{cmd}$.
-Per $N=4$ il sistema è sottodeterminato; si sceglie la soluzione a norma
-minima:
+\subsection{Torque allocation}
+The controller produces a desired body torque $\T_{cmd}\in\mathbb{R}^3$.
+One has to find $\vect T_{rw}\in\mathbb{R}^N$ such that $-A\vect T_{rw}=\T_{cmd}$.
+For $N=4$ the system is underdetermined; the minimum-norm solution is
+chosen:
 \begin{equation}
   \vect T_{rw} = -A^{+}\,\T_{cmd},\qquad A^{+} = A^T(AA^T)^{-1},
 \end{equation}
-dove $A^+$ è la pseudo-inversa di Moore--Penrose. Qualunque soluzione si può
-scrivere come $-A^+\T_{cmd} + \vect n$, con $\vect n\in\ker A$ (lo \emph{spazio
-nullo}, di dimensione $N-3=1$): componenti lungo $\vect n$ cambiano le
-velocità delle ruote \emph{senza} produrre coppia sul corpo.
+where $A^+$ is the Moore--Penrose pseudo-inverse. Any solution can be
+written as $-A^+\T_{cmd} + \vect n$, with $\vect n\in\ker A$ (the \emph{null
+space}, of dimension $N-3=1$): components along $\vect n$ change the wheel
+speeds \emph{without} producing torque on the body.
 
-\subsection{Saturazioni}
-Due limiti fisici:
+\subsection{Saturations}
+Two physical limits:
 \begin{align}
-  |T_{rw,i}| &\le T_{max} = 2\ \text{mN\,m} &&\text{(corrente massima del motore)},\\
-  |\Omega_i| &\le \Omega_{max} = 6000\ \text{RPM}\approx 628\ \text{rad/s} &&\text{(limite meccanico/back-EMF)}.
+  |T_{rw,i}| &\le T_{max} = 2\ \text{mN\,m} &&\text{(maximum motor current)},\\
+  |\Omega_i| &\le \Omega_{max} = 6000\ \text{RPM}\approx 628\ \text{rad/s} &&\text{(mechanical/back-EMF limit)}.
 \end{align}
-Poiché la coppia è mantenuta costante per tutto il passo di integrazione
-$\Delta t$ (\S\ref{sec:rk4}), l'equazione~\eqref{eq:rw} ha soluzione esatta
-$\Omega_i(t+\Delta t) = \Omega_i(t) + T_{rw,i}\Delta t/I_{rw}$. Il comando viene
-dunque limitato \emph{prima} dell'integrazione:
+Since the torque is held constant over the whole integration step
+$\Delta t$ (\S\ref{sec:rk4}), equation~\eqref{eq:rw} has the exact solution
+$\Omega_i(t+\Delta t) = \Omega_i(t) + T_{rw,i}\Delta t/I_{rw}$. The command is
+therefore limited \emph{before} integration:
 \begin{equation}
   \frac{(-\Omega_{max}-\Omega_i)\,I_{rw}}{\Delta t}
   \ \le\ T_{rw,i}\ \le\
   \frac{(\Omega_{max}-\Omega_i)\,I_{rw}}{\Delta t}.
 \end{equation}
-In questo modo la ruota raggiunge esattamente $\Omega_{max}$ senza mai
-superarla, e non è necessario ``tagliare'' lo stato a posteriori
-(\emph{clipping}), operazione che distruggerebbe momento angolare in modo non
-fisico. In saturazione la ruota accetta coppia solo nel verso che la
-rallenta.
+This way the wheel reaches exactly $\Omega_{max}$ without ever exceeding it,
+and there is no need to ``cut'' the state afterwards
+(\emph{clipping}), an operation that would destroy angular momentum in a
+non-physical way. At saturation the wheel accepts torque only in the direction
+that slows it down.
 
-Il momento angolare massimo immagazzinabile da una ruota è
+The maximum angular momentum a wheel can store is
 $h_{max} = I_{rw}\Omega_{max} = 1.5\cdot10^{-5}\cdot628 \approx 9.4$ mN\,m\,s.
 
-\subsection{Modello di consumo elettrico}
-La potenza assorbita dalla ruota $i$ è modellata come
+\subsection{Power consumption model}
+The power drawn by wheel $i$ is modelled as
 \begin{equation}
-  P_i = k_1\,|T_{rw,i}| + k_2\,|T_{rw,i}\,\Omega_i| + P_{statica}.
-  \label{eq:potenza}
+  P_i = k_1\,|T_{rw,i}| + k_2\,|T_{rw,i}\,\Omega_i| + P_{static}.
+  \label{eq:power}
 \end{equation}
 \begin{itemize}
-  \item $k_1|T|$: in un motore brushless $T = k_t\,i$; le perdite (resistive
-        nel driver e negli avvolgimenti) crescono con la corrente e dunque con
-        la coppia. La dipendenza reale è quadratica ($R i^2$); qui è
-        linearizzata.
-  \item $k_2|T\Omega|$: $T\Omega$ è la potenza meccanica trasferita al rotore;
-        $k_2 = 1/\eta \approx 1.2$ tiene conto del rendimento. Il valore
-        assoluto implica che la frenata \emph{non} rigenera energia.
-  \item $P_{statica}$: elettronica di controllo, encoder, perdite nei
-        cuscinetti.
+  \item $k_1|T|$: in a brushless motor $T = k_t\,i$; the losses (resistive,
+        in the driver and in the windings) grow with the current and hence with
+        the torque. The real dependence is quadratic ($R i^2$); here it is
+        linearised.
+  \item $k_2|T\Omega|$: $T\Omega$ is the mechanical power transferred to the rotor;
+        $k_2 = 1/\eta \approx 1.2$ accounts for the efficiency. The absolute
+        value implies that braking does \emph{not} regenerate energy.
+  \item $P_{static}$: control electronics, encoder, bearing losses.
 \end{itemize}
-L'energia $E = \int_0^t \sum_i P_i\,d\tau$ è inserita nel vettore di stato e
-integrata con RK4 insieme alla dinamica: $\dot E = \sum_i P_i$. Così resta
-accurata anche quando $\Omega_i$ varia molto nel passo.
+The energy $E = \int_0^t \sum_i P_i\,d\tau$ is part of the state vector and is
+integrated with RK4 together with the dynamics: $\dot E = \sum_i P_i$. This keeps
+it accurate even when $\Omega_i$ changes a lot within a step.
 
-\begin{codice}
-Classe \code{ReactionWheelArray}: \code{\_spin\_axes()} (matrice $A$),
-\code{limit\_torque()} (saturazioni), \code{power()} (eq.~\ref{eq:potenza}),
-\code{momentum\_body()} (eq.~\ref{eq:hrw}); allocazione in
+\begin{incode}
+Class \code{ReactionWheelArray}: \code{\_spin\_axes()} (matrix $A$),
+\code{limit\_torque()} (saturations), \code{power()} (eq.~\ref{eq:power}),
+\code{momentum\_body()} (eq.~\ref{eq:hrw}); allocation in
 \code{SatelliteEngine.allocate()}.
-\end{codice}
+\end{incode}
 
-\begin{miglioramento}
+\begin{improvement}
 \begin{itemize}[nosep]
-  \item \textbf{Attrito}: $T_f = -c_v\Omega - T_c\,\mathrm{sign}(\Omega)$
-        (viscoso + Coulomb), con la tipica ``zona morta'' attorno a
-        $\Omega=0$ (\emph{zero-crossing}), fonte di disturbi reali.
-  \item \textbf{Dinamica del motore}: ritardo del primo ordine
-        $\tau_m\dot T = T_{cmd}-T$ e quantizzazione del comando.
-  \item \textbf{Limite di coppia dipendente dalla velocità} (back-EMF):
+  \item \textbf{Friction}: $T_f = -c_v\Omega - T_c\,\mathrm{sign}(\Omega)$
+        (viscous + Coulomb), with the typical ``dead zone'' around
+        $\Omega=0$ (\emph{zero-crossing}), a source of real disturbances.
+  \item \textbf{Motor dynamics}: first-order lag
+        $\tau_m\dot T = T_{cmd}-T$ and command quantisation.
+  \item \textbf{Speed-dependent torque limit} (back-EMF):
         $T_{max}(\Omega) = T_{max}\,(1-|\Omega|/\Omega_{no\text{-}load})$.
-  \item \textbf{Potenza più realistica}: $P = R\,(T/k_t)^2 + T\Omega/\eta + P_s$,
-        con eventuale frenata rigenerativa.
-  \item Sfruttare lo \textbf{spazio nullo} (4 ruote) per tenere le velocità
-        lontane da zero e dalla saturazione.
-  \item Squilibri statici/dinamici del rotore (\emph{micro-vibrazioni}).
+  \item \textbf{More realistic power}: $P = R\,(T/k_t)^2 + T\Omega/\eta + P_s$,
+        possibly with regenerative braking.
+  \item Use the \textbf{null space} (4 wheels) to keep the speeds away from
+        zero and from saturation.
+  \item Static/dynamic rotor imbalance (\emph{micro-vibrations}).
 \end{itemize}
-\end{miglioramento}
+\end{improvement}
 
 % =============================================================================
-\section{Equazione 3 --- Equazioni di Eulero con accoppiamento giroscopico}\label{sec:eulero}
+\section{Equation 3 --- Euler equations with gyroscopic coupling}\label{sec:euler}
 % =============================================================================
 
-\subsection{Derivazione}
-Si parte dalla seconda equazione cardinale in un riferimento inerziale:
+\subsection{Derivation}
+Start from the angular momentum balance in an inertial frame:
 \begin{equation}
-  \left.\frac{d\vect H}{dt}\right|_{\mathcal I} = \T_{est}.
+  \left.\frac{d\vect H}{dt}\right|_{\mathcal I} = \T_{ext}.
 \end{equation}
-Per un vettore espresso in un riferimento rotante con velocità $\w$ vale il
-\emph{teorema di trasporto}:
+For a vector expressed in a frame rotating with angular velocity $\w$ the
+\emph{transport theorem} holds:
 \begin{equation}
   \left.\frac{d\vect H}{dt}\right|_{\mathcal I} =
   \left.\frac{d\vect H}{dt}\right|_{\mathcal B} + \w\times\vect H .
 \end{equation}
-Sostituendo $\vect H = J\w + \h$, con $J$ costante in $\mathcal{B}$:
+Substituting $\vect H = J\w + \h$, with $J$ constant in $\mathcal{B}$:
 \begin{equation}
   J\dot\w + \dot{\vect h}_{rw} + \w\times(J\w+\h) = \T_{dist}.
 \end{equation}
-Dalle \eqref{eq:rw}--\eqref{eq:hrw}, $\dot{\vect h}_{rw} = A I_{rw}\dot{\vect\Omega} = A\vect T_{rw}$.
-Portando questo termine a destra si ottiene l'equazione implementata:
+From \eqref{eq:rw}--\eqref{eq:hrw}, $\dot{\vect h}_{rw} = A I_{rw}\dot{\vect\Omega} = A\vect T_{rw}$.
+Moving this term to the right-hand side gives the implemented equation:
 \begin{equation}
   \boxed{\;J\,\dot\w = \T_{tot} - \w\times\left(J\w + \h\right),
   \qquad \T_{tot} = -A\vect T_{rw} + \T_{dist}\;}
-  \label{eq:eulero}
+  \label{eq:euler}
 \end{equation}
-e quindi $\dot\w = J^{-1}\left[\T_{tot} - \w\times(J\w+\h)\right]$.
+and therefore $\dot\w = J^{-1}\left[\T_{tot} - \w\times(J\w+\h)\right]$.
 
-\subsection{Interpretazione fisica dei termini}
+\subsection{Physical interpretation of the terms}
 \begin{itemize}
-  \item $\w\times J\w$: accoppiamento non lineare del corpo rigido.
-        È responsabile, ad esempio, della precessione libera (moto di
-        Eulero--Poinsot) e dell'instabilità della rotazione attorno all'asse
-        di inerzia intermedia (\emph{effetto Dzhanibekov}).
-  \item $\w\times\h$: \emph{rigidezza giroscopica} delle ruote. Se il corpo
-        ruota mentre le ruote immagazzinano momento, compare una coppia su un
-        asse perpendicolare a entrambi. Diventa importante quando le ruote
-        sono veloci.
+  \item $\w\times J\w$: nonlinear coupling of the rigid body.
+        It is responsible, for example, for free precession (Euler--Poinsot
+        motion) and for the instability of rotation about the axis of
+        intermediate inertia (\emph{Dzhanibekov effect}).
+  \item $\w\times\h$: \emph{gyroscopic stiffness} of the wheels. If the body
+        rotates while the wheels store momentum, a torque appears about an
+        axis perpendicular to both. It becomes important when the wheels
+        spin fast.
 \end{itemize}
 
-\subsection{Conservazione del momento angolare}
+\subsection{Conservation of angular momentum}
 \begin{prop}\label{prop:H}
-Se $\T_{dist}=\vect 0$, il momento angolare totale espresso nel riferimento
-inerziale, $\vect H_I = R(\q)\,(J\w + \h)$, è costante qualunque sia il comando
+If $\T_{dist}=\vect 0$, the total angular momentum expressed in the inertial
+frame, $\vect H_I = R(\q)\,(J\w + \h)$, is constant for any command
 $\vect T_{rw}(t)$.
 \end{prop}
 \begin{proof}
-Sia $\vect H_B = J\w+\h$. Dalla \eqref{eq:eulero} e da $\dot{\vect h}_{rw}=A\vect T_{rw}$:
+Let $\vect H_B = J\w+\h$. From \eqref{eq:euler} and $\dot{\vect h}_{rw}=A\vect T_{rw}$:
 $\dot{\vect H}_B = -A\vect T_{rw} - \w\times\vect H_B + A\vect T_{rw} = -\w\times\vect H_B$.
-Inoltre $\dot R = R\,\skewm{\w}$. Quindi
+Moreover $\dot R = R\,\skewm{\w}$. Hence
 $\dot{\vect H}_I = R\skewm{\w}\vect H_B + R\dot{\vect H}_B = R(\w\times\vect H_B - \w\times\vect H_B) = \vect 0$.
 \end{proof}
-Questa proprietà è verificata numericamente nei test (errore $<10^{-9}$ N\,m\,s
-dopo 100 s con coppie casuali) ed è il controllo più efficace sulla coerenza
-dei segni fra ruote, Eulero e allocazione.
+This property is checked numerically in the tests (error $<10^{-9}$ N\,m\,s
+after 100 s with random torques) and is the most effective check of the sign
+consistency between wheels, Euler and allocation.
 
-Analogamente, senza ruote né coppie, si conserva l'energia cinetica
-$K = \tfrac12\w^TJ\w$, poiché $\dot K = \w^TJ\dot\w = -\w^T(\w\times J\w) = 0$.
+Similarly, without wheels or torques, the kinetic energy
+$K = \tfrac12\w^TJ\w$ is conserved, since $\dot K = \w^TJ\dot\w = -\w^T(\w\times J\w) = 0$.
 
-\begin{codice}
+\begin{incode}
 \code{SatelliteEngine.\_derivatives()}: \code{w\_dot = J\_inv @ (T\_total - cross3(w, J @ w + h))}.
-\end{codice}
+\end{incode}
 
 % =============================================================================
-\section{Equazione 4 --- Cinematica dei quaternioni}\label{sec:quat}
+\section{Equation 4 --- Quaternion kinematics}\label{sec:quat}
 % =============================================================================
 
-\subsection{Perché i quaternioni}
-Gli angoli di Eulero (3 parametri) presentano singolarità
-(\emph{gimbal lock}): per certi assetti la mappa dalle velocità angolari alle
-derivate degli angoli diverge. Nessuna parametrizzazione a 3 parametri di
-$SO(3)$ è globalmente priva di singolarità. I quaternioni unitari usano 4
-parametri con il vincolo $\norm{\q}=1$ e sono privi di singolarità, oltre a
-essere computazionalmente economici (niente funzioni trigonometriche).
+\subsection{Why quaternions}
+Euler angles (3 parameters) have singularities
+(\emph{gimbal lock}): for some attitudes the map from angular velocities to
+angle derivatives diverges. No 3-parameter parametrisation of
+$SO(3)$ is globally singularity-free. Unit quaternions use 4
+parameters with the constraint $\norm{\q}=1$ and are singularity-free, as well
+as computationally cheap (no trigonometric functions).
 
-\subsection{Definizione e algebra}
-Un quaternione unitario che rappresenta una rotazione di angolo $\theta$
-attorno all'asse unitario $\vect e$ è
+\subsection{Definition and algebra}
+A unit quaternion representing a rotation by an angle $\theta$
+about the unit axis $\vect e$ is
 \begin{equation}
   \q = \begin{bmatrix}\cos(\theta/2)\\ \sin(\theta/2)\,\vect e\end{bmatrix}.
 \end{equation}
-Il prodotto di Hamilton è
+The Hamilton product is
 \begin{equation}
   \vect p\otimes\q =
   \begin{bmatrix}
@@ -454,9 +453,9 @@ Il prodotto di Hamilton è
     p_0\q_v + q_0\vect p_v + \vect p_v\times\q_v
   \end{bmatrix},
 \end{equation}
-il coniugato $\q^* = [q_0, -\q_v^T]^T$ rappresenta la rotazione inversa.
-La rotazione di un vettore si scrive $[0,\vect v_I] = \q\otimes[0,\vect v_B]\otimes\q^*$,
-equivalente a $\vect v_I = R(\q)\vect v_B$ con
+and the conjugate $\q^* = [q_0, -\q_v^T]^T$ represents the inverse rotation.
+The rotation of a vector is written $[0,\vect v_I] = \q\otimes[0,\vect v_B]\otimes\q^*$,
+equivalent to $\vect v_I = R(\q)\vect v_B$ with
 \begin{equation}
 R(\q)=\begin{bmatrix}
 1-2(q_2^2+q_3^2) & 2(q_1q_2-q_0q_3) & 2(q_1q_3+q_0q_2)\\
@@ -465,8 +464,8 @@ R(\q)=\begin{bmatrix}
 \end{bmatrix}.
 \end{equation}
 
-\subsection{Equazione cinematica}
-Con $\w$ espressa in body, la derivata del quaternione è
+\subsection{Kinematic equation}
+With $\w$ expressed in body axes, the quaternion derivative is
 \begin{equation}
   \dot\q = \frac12\,\q\otimes\begin{bmatrix}0\\ \w\end{bmatrix}
   = \frac12\begin{bmatrix}
@@ -477,126 +476,126 @@ Con $\w$ espressa in body, la derivata del quaternione è
   \end{bmatrix}.
   \label{eq:qdot}
 \end{equation}
-\emph{Idea della derivazione}: in un intervallo $dt$ il corpo compie una
-rotazione infinitesima $d\q \approx [1, \tfrac12\w\,dt]$ attorno ai propri assi
-(body), che si compone \emph{a destra}: $\q(t+dt) = \q(t)\otimes d\q$. Da qui
+\emph{Idea of the derivation}: in an interval $dt$ the body performs an
+infinitesimal rotation $d\q \approx [1, \tfrac12\w\,dt]$ about its own (body)
+axes, which is composed \emph{on the right}: $\q(t+dt) = \q(t)\otimes d\q$. Hence
 $\dot\q = \tfrac12\q\otimes[0,\w]$.
 
-\subsection{Normalizzazione}
-L'equazione \eqref{eq:qdot} conserva esattamente la norma
-($\tfrac{d}{dt}\norm{\q}^2 = 2\q\cdot\dot\q = 0$), ma l'integratore numerico
-no: l'errore di troncamento fa lentamente derivare $\norm{\q}$. Dopo ogni
-passo il quaternione viene quindi riproiettato sulla sfera unitaria:
+\subsection{Normalisation}
+Equation \eqref{eq:qdot} preserves the norm exactly
+($\tfrac{d}{dt}\norm{\q}^2 = 2\q\cdot\dot\q = 0$), but the numerical integrator
+does not: the truncation error makes $\norm{\q}$ drift slowly. After every
+step the quaternion is therefore projected back onto the unit sphere:
 $\q\leftarrow\q/\norm{\q}$.
 
-\subsection{Errore d'assetto}
-Dato il target $\q_t$, l'errore è la rotazione che porta dal target all'assetto
-attuale:
+\subsection{Attitude error}
+Given the target $\q_t$, the error is the rotation that takes the target to the
+current attitude:
 \begin{equation}
   \q_e = \q_t^*\otimes\q,\qquad
   \theta_{err} = 2\arccos|q_{e,0}|.
 \end{equation}
-Poiché $\q$ e $-\q$ rappresentano lo stesso assetto (doppia copertura di
-$SO(3)$), si sceglie il segno con $q_{e,0}\ge0$: così $\theta_{err}\le180^\circ$
-e il controllore ruota sempre per la via più breve, evitando l'\emph{unwinding}
-(fare quasi un giro completo inutile).
+Since $\q$ and $-\q$ represent the same attitude (double cover of
+$SO(3)$), the sign with $q_{e,0}\ge0$ is chosen: thus $\theta_{err}\le180^\circ$
+and the controller always rotates the shortest way, avoiding \emph{unwinding}
+(an almost complete, useless turn).
 
-\begin{codice}
+\begin{incode}
 \code{quaternion.py}: \code{quat\_mult}, \code{quat\_to\_dcm}, \code{quat\_error},
-\code{quat\_angle\_deg}. Normalizzazione in \code{SatelliteEngine.step()}.
-\end{codice}
+\code{quat\_angle\_deg}. Normalisation in \code{SatelliteEngine.step()}.
+\end{incode}
 
 % =============================================================================
-\section{Equazione 5 --- Coppie di disturbo ambientali}\label{sec:disturbi}
+\section{Equation 5 --- Environmental disturbance torques}\label{sec:disturbances}
 % =============================================================================
 
-La coppia totale agente sul corpo è
+The total torque acting on the body is
 \begin{equation}
-  \T_{tot} = \T_{rw,azione} + \T_{gg} + \T_{srp} + \T_{mag}\ (+\ \T_{manuale}).
+  \T_{tot} = \T_{rw,action} + \T_{gg} + \T_{srp} + \T_{mag}\ (+\ \T_{manual}).
 \end{equation}
-I disturbi dipendono dalla posizione orbitale e dall'assetto, e sono
-ricalcolati a ogni stadio dell'integratore RK4.
+The disturbances depend on the orbital position and on the attitude, and are
+recomputed at every stage of the RK4 integrator.
 
-\subsection{Modello d'orbita}
-Orbita circolare kepleriana di raggio $r = R_\oplus + 500$ km, inclinazione
-$i = 51.6^\circ$, ascensione retta del nodo $\Omega_{RAAN}$:
+\subsection{Orbit model}
+Circular Keplerian orbit of radius $r = R_\oplus + 500$ km, inclination
+$i = 51.6^\circ$, right ascension of the ascending node $\Omega_{RAAN}$:
 \begin{equation}
   \vect r_I(t) = R_3(-\Omega_{RAAN})\,R_1(-i)\;r\begin{bmatrix}\cos u\\ \sin u\\ 0\end{bmatrix},
   \qquad u = u_0 + n t,\quad n=\sqrt{\mu/r^3},
 \end{equation}
-con $\mu = 3.986\cdot10^{14}$ m$^3$/s$^2$. Il periodo è
+with $\mu = 3.986\cdot10^{14}$ m$^3$/s$^2$. The period is
 $T_{orb} = 2\pi/n \approx 94.5$ min.
 
-\subsection{Gradiente di gravità}
-\paragraph{Origine fisica.} Il campo gravitazionale decresce come $1/r^2$: la
-parte del satellite più vicina alla Terra è attratta un po' più di quella
-lontana. Se il corpo non è simmetrico rispetto alla verticale locale, questa
-differenza produce una coppia.
+\subsection{Gravity gradient}
+\paragraph{Physical origin.} The gravitational field decreases as $1/r^2$: the
+part of the satellite closest to the Earth is pulled slightly more than the
+far part. If the body is not symmetric about the local vertical, this
+difference produces a torque.
 
-\paragraph{Derivazione.} La coppia è $\T = \int \vect\rho\times d\vect F$ con
+\paragraph{Derivation.} The torque is $\T = \int \vect\rho\times d\vect F$ with
 $d\vect F = -\mu\,(\vect r+\vect\rho)/\norm{\vect r+\vect\rho}^3\,dm$.
-Sviluppando al primo ordine in $\rho/r$ e usando
-$\int\vect\rho\,dm = 0$ (origine nel baricentro):
+Expanding to first order in $\rho/r$ and using
+$\int\vect\rho\,dm = 0$ (origin at the centre of mass):
 \begin{equation}
   \T_{gg} = \frac{3\mu}{r^3}\;\hat{\vect r}_B\times\left(J\,\hat{\vect r}_B\right),
   \qquad
   \hat{\vect r}_B = R(\q)^T\,\frac{\vect r_I}{r}.
 \end{equation}
 
-\paragraph{Proprietà.}
+\paragraph{Properties.}
 \begin{itemize}[nosep]
-  \item $\T_{gg}=\vect 0$ se $\hat{\vect r}_B$ è un autovettore di $J$ (asse
-        principale allineato con la verticale).
-  \item Tende ad allineare l'asse di \emph{minima} inerzia con la verticale:
-        principio della stabilizzazione passiva a gradiente di gravità.
-  \item Ordine di grandezza: $3\mu/r^3\approx 3.4\cdot10^{-6}$ s$^{-2}$,
+  \item $\T_{gg}=\vect 0$ if $\hat{\vect r}_B$ is an eigenvector of $J$ (principal
+        axis aligned with the vertical).
+  \item It tends to align the axis of \emph{minimum} inertia with the vertical:
+        the principle of passive gravity-gradient stabilisation.
+  \item Order of magnitude: $3\mu/r^3\approx 3.4\cdot10^{-6}$ s$^{-2}$,
         $\Delta J\approx 0.02$ kg\,m$^2$ $\Rightarrow$ $|\T_{gg}|\lesssim 3.5\cdot10^{-8}$ N\,m.
 \end{itemize}
 
-\subsection{Pressione di radiazione solare (SRP)}
-\paragraph{Origine fisica.} I fotoni trasportano quantità di moto $p=E/c$.
-A 1 UA il flusso solare $\Phi\approx 1361$ W/m$^2$ esercita una pressione
+\subsection{Solar radiation pressure (SRP)}
+\paragraph{Physical origin.} Photons carry momentum $p=E/c$.
+At 1 AU the solar flux $\Phi\approx 1361$ W/m$^2$ exerts a pressure
 $P_\odot = \Phi/c \approx 4.56\cdot10^{-6}$ N/m$^2$.
 
-\paragraph{Modello a facce piane.} Il satellite è descritto dalle sue 6 facce
-(normale $\hat{\vect n}_k$, area $A_k$, centro $\vect r_k$). Detta
-$\hat{\vect s}$ la direzione del Sole in body e
-$\cos\theta_k = \hat{\vect n}_k\cdot\hat{\vect s}$, ogni faccia illuminata
-($\cos\theta_k>0$) riceve la forza
+\paragraph{Flat-face model.} The satellite is described by its 6 faces
+(normal $\hat{\vect n}_k$, area $A_k$, centre $\vect r_k$). With
+$\hat{\vect s}$ the Sun direction in body axes and
+$\cos\theta_k = \hat{\vect n}_k\cdot\hat{\vect s}$, every lit face
+($\cos\theta_k>0$) receives the force
 \begin{equation}
   \vect F_k = -P_\odot A_k\cos\theta_k
   \left[(1-\rho_s)\,\hat{\vect s} + 2\left(\rho_s\cos\theta_k + \frac{\rho_d}{3}\right)\hat{\vect n}_k\right],
 \end{equation}
-dove $\rho_s,\rho_d$ sono le frazioni di luce riflessa specularmente e
-diffusamente (la frazione $1-\rho_s-\rho_d$ è assorbita). I tre contributi
-sono: assorbimento (spinta lungo $\hat{\vect s}$), riflessione speculare
-(spinta lungo la normale, fattore 2 per l'inversione della quantità di moto),
-riflessione diffusa lambertiana (fattore $2/3$ lungo la normale). La coppia è
+where $\rho_s,\rho_d$ are the fractions of light reflected specularly and
+diffusely (the fraction $1-\rho_s-\rho_d$ is absorbed). The three contributions
+are: absorption (push along $\hat{\vect s}$), specular reflection
+(push along the normal, factor 2 for the momentum reversal),
+Lambertian diffuse reflection (factor $2/3$ along the normal). The torque is
 \begin{equation}
   \T_{srp} = \sum_{k:\cos\theta_k>0} (\vect r_k - \vect r_{cm})\times\vect F_k .
 \end{equation}
-La coppia nasce dall'\textbf{offset fra centro di pressione e centro di massa}:
-se il baricentro coincidesse con il centro geometrico, per simmetria le coppie
-si annullerebbero. Nel simulatore $\vect r_{cm} = [2,-1,10]$ mm.
+The torque arises from the \textbf{offset between the centre of pressure and the centre of mass}:
+if the centre of mass coincided with the geometric centre, the torques would
+cancel by symmetry. In the simulator $\vect r_{cm} = [2,-1,10]$ mm.
 
-\paragraph{Eclisse.} Modello a ombra cilindrica: il satellite è in ombra se
-$\vect r\cdot\hat{\vect s}<0$ e la sua distanza dall'asse Terra--Sole è minore
-di $R_\oplus$:
+\paragraph{Eclipse.} Cylindrical shadow model: the satellite is in shadow if
+$\vect r\cdot\hat{\vect s}<0$ and its distance from the Earth--Sun axis is less
+than $R_\oplus$:
 \begin{equation}
-  \text{eclisse}\iff \vect r\cdot\hat{\vect s} < 0\ \wedge\
+  \text{eclipse}\iff \vect r\cdot\hat{\vect s} < 0\ \wedge\
   \norm{\vect r - (\vect r\cdot\hat{\vect s})\hat{\vect s}} < R_\oplus .
 \end{equation}
-In eclisse $\T_{srp}=\vect 0$. Ordine di grandezza:
+In eclipse $\T_{srp}=\vect 0$. Order of magnitude:
 $P_\odot\cdot0.03\ \text{m}^2\cdot0.01\ \text{m}\approx 10^{-9}$ N\,m.
 
-\subsection{Coppia magnetica residua}
-\paragraph{Origine fisica.} Correnti nei circuiti e materiali magnetizzati
-conferiscono al satellite un momento di dipolo magnetico residuo $\vect m$
-(tipicamente $10^{-3}$--$10^{-2}$ A\,m$^2$ per un CubeSat). In un campo
-$\vect B$ un dipolo subisce la coppia $\vect m\times\vect B$ (come l'ago di una
-bussola).
+\subsection{Residual magnetic torque}
+\paragraph{Physical origin.} Currents in the circuits and magnetised materials
+give the satellite a residual magnetic dipole moment $\vect m$
+(typically $10^{-3}$--$10^{-2}$ A\,m$^2$ for a CubeSat). In a field
+$\vect B$ a dipole experiences the torque $\vect m\times\vect B$ (like a
+compass needle).
 
-\paragraph{Modello del campo.} Campo terrestre di dipolo, con asse di dipolo
+\paragraph{Field model.} Dipole Earth field, with dipole axis
 $\hat{\vect m}_\oplus = -\hat{\vect z}_I$:
 \begin{equation}
   \vect B_I(\vect r) = B_0\left(\frac{R_\oplus}{r}\right)^3
@@ -606,62 +605,62 @@ $\hat{\vect m}_\oplus = -\hat{\vect z}_I$:
 \begin{equation}
   \T_{mag} = \vect m\times\left(R(\q)^T\vect B_I\right).
 \end{equation}
-A 500 km $|\vect B|\approx 25$--$50\ \mu$T, quindi
-$|\T_{mag}|\sim 10^{-7}$ N\,m: è tipicamente il \textbf{disturbo dominante}
-per un CubeSat in orbita bassa.
+At 500 km $|\vect B|\approx 25$--$50\ \mu$T, hence
+$|\T_{mag}|\sim 10^{-7}$ N\,m: it is typically the \textbf{dominant disturbance}
+for a CubeSat in low Earth orbit.
 
-\subsection{Coppia manuale}
-Coppia costante in body impostabile dalla GUI ($\pm5$ mN\,m) o impulso di 1 s.
-È volutamente di vari ordini di grandezza superiore ai disturbi naturali,
-per rendere visibili la risposta del controllore e la saturazione delle ruote.
+\subsection{Manual torque}
+Constant body torque set from the GUI ($\pm5$ mN\,m) or a 1 s impulse.
+It is deliberately several orders of magnitude larger than the natural
+disturbances, to make the controller response and the wheel saturation visible.
 
-\subsection{Confronto degli ordini di grandezza}
+\subsection{Comparison of orders of magnitude}
 \begin{center}
 \begin{tabular}{lcc}
 \toprule
-Coppia & Ordine di grandezza [N\,m] & Accumulo di momento in un'orbita [N\,m\,s]\\
+Torque & Order of magnitude [N\,m] & Momentum accumulated in one orbit [N\,m\,s]\\
 \midrule
-Gradiente di gravità & $10^{-8}$ & $\lesssim 10^{-4}$ (in parte periodico)\\
-Pressione solare & $10^{-9}$ & $\sim 10^{-6}$\\
-Magnetica residua & $10^{-7}$ & $\sim 10^{-4}$--$10^{-3}$\\
-Capacità ruote (azione) & $2\cdot10^{-3}$ & $h_{max}\approx 9.4\cdot10^{-3}$ per ruota\\
+Gravity gradient & $10^{-8}$ & $\lesssim 10^{-4}$ (partly periodic)\\
+Solar pressure & $10^{-9}$ & $\sim 10^{-6}$\\
+Residual magnetic & $10^{-7}$ & $\sim 10^{-4}$--$10^{-3}$\\
+Wheel capacity (action) & $2\cdot10^{-3}$ & $h_{max}\approx 9.4\cdot10^{-3}$ per wheel\\
 \bottomrule
 \end{tabular}
 \end{center}
-Le componenti \emph{secolari} (non periodiche) dei disturbi si accumulano nelle
-ruote orbita dopo orbita: senza \emph{momentum dumping} le ruote prima o poi
-saturano.
+The \emph{secular} (non-periodic) components of the disturbances accumulate in
+the wheels orbit after orbit: without \emph{momentum dumping} the wheels
+sooner or later saturate.
 
-\begin{codice}
+\begin{incode}
 \code{environment.OrbitalEnvironment}: \code{position()}, \code{in\_eclipse()},
 \code{magnetic\_field\_inertial()}, \code{srp\_torque()},
 \code{disturbance\_torques()}.
-\end{codice}
+\end{incode}
 
-\begin{miglioramento}
+\begin{improvement}
 \begin{itemize}[nosep]
-  \item \textbf{Coppia aerodinamica}: a 500 km è dello stesso ordine di SRP e
-        gradiente: $\vect F_k = -\tfrac12\rho_{atm} v^2 C_D A_k \max(0,\hat{\vect n}_k\cdot\hat{\vect v})\,\hat{\vect v}$,
-        con densità da modello esponenziale o NRLMSISE-00.
-  \item \textbf{Campo magnetico IGRF} (dipolo inclinato + armoniche superiori,
-        rotazione terrestre); dipolo residuo variabile con la corrente assorbita.
-  \item \textbf{Orbita}: propagazione con perturbazione $J_2$ o SGP4 da TLE
-        reali; moto apparente del Sole (effemeridi); ombra conica
-        (penombra).
-  \item Frame orbitale LVLH e target di puntamento a nadir (più realistico
-        per un'osservazione della Terra).
-  \item Attuatori di scarico: \textbf{magnetorquer} con legge
+  \item \textbf{Aerodynamic torque}: at 500 km it is of the same order as SRP and
+        gravity gradient: $\vect F_k = -\tfrac12\rho_{atm} v^2 C_D A_k \max(0,\hat{\vect n}_k\cdot\hat{\vect v})\,\hat{\vect v}$,
+        with density from an exponential model or NRLMSISE-00.
+  \item \textbf{IGRF magnetic field} (tilted dipole + higher harmonics,
+        Earth rotation); residual dipole varying with the current drawn.
+  \item \textbf{Orbit}: propagation with $J_2$ perturbation or SGP4 from real
+        TLEs; apparent motion of the Sun (ephemerides); conical shadow
+        (penumbra).
+  \item LVLH orbital frame and nadir-pointing target (more realistic
+        for Earth observation).
+  \item Dumping actuators: \textbf{magnetorquers} with the law
         $\vect m_{cmd} = \frac{k}{\norm{\vect B}^2}\,\vect B\times\Delta\vect h$.
 \end{itemize}
-\end{miglioramento}
+\end{improvement}
 
 % =============================================================================
-\section{Integrazione numerica}\label{sec:rk4}
+\section{Numerical integration}\label{sec:rk4}
 % =============================================================================
 
-\subsection{Runge--Kutta del quarto ordine}
-Il sistema $\dot{\vect x} = f(t,\vect x,\vect u)$ è integrato con RK4 a passo
-fisso $\Delta t = 0.05$ s:
+\subsection{Fourth-order Runge--Kutta}
+The system $\dot{\vect x} = f(t,\vect x,\vect u)$ is integrated with fixed-step
+RK4, $\Delta t = 0.05$ s:
 \begin{align}
   \vect k_1 &= f(t_n,\ \vect x_n,\ \vect u_n),\\
   \vect k_2 &= f(t_n+\tfrac{\Delta t}{2},\ \vect x_n+\tfrac{\Delta t}{2}\vect k_1,\ \vect u_n),\\
@@ -669,187 +668,190 @@ fisso $\Delta t = 0.05$ s:
   \vect k_4 &= f(t_n+\Delta t,\ \vect x_n+\Delta t\,\vect k_3,\ \vect u_n),\\
   \vect x_{n+1} &= \vect x_n + \frac{\Delta t}{6}\left(\vect k_1+2\vect k_2+2\vect k_3+\vect k_4\right).
 \end{align}
-L'errore locale di troncamento è $O(\Delta t^5)$, quello globale $O(\Delta t^4)$.
-Dopo il passo: normalizzazione del quaternione.
+The local truncation error is $O(\Delta t^5)$, the global one $O(\Delta t^4)$.
+After the step: quaternion normalisation.
 
-\subsection{Scelte progettuali}
+\subsection{Design choices}
 \begin{itemize}
-  \item \textbf{Zero-order hold}: il comando $\vect u_n$ resta costante per tutto
-        il passo. Riproduce un computer di bordo che aggiorna gli attuatori a
-        frequenza fissa (qui 20 Hz) ed è esattamente la semantica di
+  \item \textbf{Zero-order hold}: the command $\vect u_n$ stays constant for the
+        whole step. It reproduces an on-board computer that updates the
+        actuators at a fixed rate (here 20 Hz) and is exactly the semantics of
         \code{env.step(action)} in Gymnasium.
-  \item \textbf{Passo fisso}: simulazione deterministica e riproducibile, costo
-        per passo costante (importante per l'RL).
-  \item \textbf{Scelta di $\Delta t$}: le scale temporali del sistema (periodo
-        del controllore $2\pi/\omega_n\approx 16$ s, periodo orbitale 94 min)
-        sono molto maggiori di $\Delta t$. Il vincolo più stringente è la
-        velocità di tumbling: per $|\w|\Delta t \ll 1$ con
-        $|\w|\lesssim 1$ rad/s si ha ampio margine.
-  \item I disturbi sono valutati a ogni stadio $\vect k_j$, con assetto e tempo
-        intermedi.
+  \item \textbf{Fixed step}: deterministic and reproducible simulation, constant
+        cost per step (important for RL).
+  \item \textbf{Choice of $\Delta t$}: the time scales of the system (controller
+        period $2\pi/\omega_n\approx 16$ s, orbital period 94 min)
+        are much larger than $\Delta t$. The tightest constraint is the
+        tumbling rate: for $|\w|\Delta t \ll 1$ with
+        $|\w|\lesssim 1$ rad/s there is ample margin.
+  \item The disturbances are evaluated at every stage $\vect k_j$, with the
+        intermediate attitude and time.
 \end{itemize}
 
-\begin{miglioramento}
+\begin{improvement}
 \begin{itemize}[nosep]
-  \item \textbf{Integratori geometrici} (es. Crouch--Grossman, metodi di Lie
-        o aggiornamento esponenziale $\q_{n+1} = \q_n\otimes\exp(\tfrac12\w\Delta t)$)
-        che preservano esattamente $\norm{\q}=1$.
-  \item Sotto-passi di fisica più piccoli del passo di controllo (es. fisica a
-        100 Hz, controllo a 10 Hz), utile anche per l'RL (\emph{action repeat}).
-  \item Prestazioni: vettorializzare su più ambienti paralleli o compilare
-        con \code{numba} (oggi $\approx1.5$ ms/passo in NumPy).
+  \item \textbf{Geometric integrators} (e.g. Crouch--Grossman, Lie methods
+        or the exponential update $\q_{n+1} = \q_n\otimes\exp(\tfrac12\w\Delta t)$)
+        that preserve $\norm{\q}=1$ exactly.
+  \item Physics sub-steps smaller than the control step (e.g. physics at
+        100 Hz, control at 10 Hz), also useful for RL (\emph{action repeat}).
+  \item Performance: vectorise over several parallel environments or compile
+        with \code{numba} (today $\approx1.5$ ms/step in NumPy).
 \end{itemize}
-\end{miglioramento}
+\end{improvement}
 
 % =============================================================================
-\section{Controllore PD sui quaternioni}\label{sec:pd}
+\section{Quaternion PD controller}\label{sec:pd}
 % =============================================================================
 
-\subsection{Legge di controllo}
-In attesa dell'agente RL, il satellite è stabilizzato dalla legge
+\subsection{Control law}
+As the classical baseline for the RL agent, the satellite is stabilised by the law
 \begin{equation}
   \T_{cmd} = -J\left(K_p\,\q_{e,v} + K_d\,\w\right) + \w\times(J\w+\h),
   \label{eq:pd}
 \end{equation}
-seguita dall'allocazione $\vect T_{rw} = -A^+\T_{cmd}$ e dalle saturazioni.
+followed by the allocation $\vect T_{rw} = -A^+\T_{cmd}$ and by the saturations.
 \begin{itemize}
-  \item Il primo termine è un PD \emph{normalizzato per l'inerzia}: moltiplicando
-        per $J$ ogni asse ha la stessa dinamica ad anello chiuso.
-  \item Il secondo termine \emph{compensa} l'accoppiamento giroscopico
-        (\emph{feedback linearization} parziale).
+  \item The first term is an \emph{inertia-normalised} PD: multiplying
+        by $J$ gives every axis the same closed-loop dynamics.
+  \item The second term \emph{compensates} the gyroscopic coupling
+        (partial \emph{feedback linearisation}).
 \end{itemize}
 
-\subsection{Scelta dei guadagni}
-Con la compensazione, e in assenza di disturbi e saturazioni, sostituendo
-\eqref{eq:pd} in \eqref{eq:eulero} si ha
-$\dot\w = -K_p\q_{e,v} - K_d\w$. Per piccoli angoli $\q_{e,v}\approx\vect\theta/2$
-e $\w\approx\dot{\vect\theta}$, quindi ogni asse è un oscillatore del secondo
-ordine:
+\subsection{Choice of the gains}
+With the compensation, and without disturbances or saturations, substituting
+\eqref{eq:pd} into \eqref{eq:euler} gives
+$\dot\w = -K_p\q_{e,v} - K_d\w$. For small angles $\q_{e,v}\approx\vect\theta/2$
+and $\w\approx\dot{\vect\theta}$, so every axis is a second-order
+oscillator:
 \begin{equation}
   \ddot\theta + K_d\dot\theta + \frac{K_p}{2}\theta = 0
   \quad\Longrightarrow\quad
   K_p = 2\omega_n^2,\qquad K_d = 2\zeta\omega_n .
 \end{equation}
-Valori di default: $\omega_n = 0.4$ rad/s, $\zeta = 0.9$ (quasi criticamente
-smorzato), da cui un tempo di assestamento al 2\% di circa
-$4/(\zeta\omega_n)\approx 11$ s nel regime lineare. Per grandi errori
-iniziali la coppia richiesta supera $T_{max}$ e la risposta è più lenta.
+Default values: $\omega_n = 0.4$ rad/s, $\zeta = 0.9$ (almost critically
+damped), giving a 2\% settling time of about
+$4/(\zeta\omega_n)\approx 11$ s in the linear regime. For large initial
+errors the requested torque exceeds $T_{max}$ and the response is slower.
 
-\subsection{Stabilità (Lyapunov)}
-Si consideri
+\subsection{Stability (Lyapunov)}
+Consider
 \begin{equation}
   V = 2K_p\,(1-q_{e,0}) + \tfrac12\,\w^T\w \ \ge 0,
 \end{equation}
-nulla solo per $q_{e,0}=1,\ \w=\vect 0$. Dalla \eqref{eq:qdot},
-$\dot q_{e,0} = -\tfrac12\q_{e,v}^T\w$, quindi
+which vanishes only for $q_{e,0}=1,\ \w=\vect 0$. From \eqref{eq:qdot},
+$\dot q_{e,0} = -\tfrac12\q_{e,v}^T\w$, hence
 \begin{equation}
   \dot V = K_p\,\q_{e,v}^T\w + \w^T\left(-K_p\q_{e,v} - K_d\w\right) = -K_d\norm{\w}^2 \le 0 .
 \end{equation}
-Per il principio di invarianza di LaSalle, l'unico insieme invariante con
-$\dot V = 0$ è $\w=\vect 0,\ \q_{e,v}=\vect 0$: l'equilibrio è asintoticamente
-stabile. Con disturbi costanti e senza azione integrale rimane un piccolo
-errore a regime ($\approx 0.003^\circ$ nel simulatore).
+By LaSalle's invariance principle, the only invariant set with
+$\dot V = 0$ is $\w=\vect 0,\ \q_{e,v}=\vect 0$: the equilibrium is asymptotically
+stable. With constant disturbances and no integral action a small
+steady-state error remains ($\approx 0.003^\circ$ in the simulator).
 
-\begin{codice}
+\begin{incode}
 \code{controller.QuaternionPDController.compute(q, omega, h\_rw, q\_target)}.
-\end{codice}
+\end{incode}
 
-\begin{miglioramento}
+\begin{improvement}
 \begin{itemize}[nosep]
-  \item Termine integrale (PID) per annullare l'errore a regime.
-  \item Limitazione della velocità di manovra (\emph{rate limiting}) per
-        grandi angoli, o profili \emph{bang-coast-bang}.
-  \item Controllo ottimo (LQR/MPC) come ulteriore baseline per l'RL.
-  \item Momentum management: controllo combinato ruote + magnetorquer.
+  \item Integral term (PID) to remove the steady-state error.
+  \item Limiting the manoeuvre rate (\emph{rate limiting}) for
+        large angles, or \emph{bang-coast-bang} profiles.
+  \item Optimal control (LQR/MPC) as a further baseline for RL.
+  \item Momentum management: combined wheel + magnetorquer control.
 \end{itemize}
-\end{miglioramento}
+\end{improvement}
 
 % =============================================================================
-\section{Verifica del modello}
+\section{Model verification}
 % =============================================================================
 
-Il file \code{tests/test\_physics.py} verifica le proprietà fisiche fondamentali
+The file \code{tests/test\_physics.py} checks the fundamental physical properties
 (\code{python -m pytest -q}):
 \begin{center}
 \begin{tabular}{p{5.2cm}p{9cm}}
 \toprule
-Test & Proprietà verificata\\
+Test & Property checked\\
 \midrule
-\code{inertia\_matrix\_3U} & $J$ coincide con la formula analitica ed è simmetrica.\\
-\code{torque\_free\_conservation} & Moto libero per 100 s: $\vect H_I$ costante ($<10^{-9}$), $K$ costante ($<10^{-7}$ relativo), $\norm{\q}=1$.\\
-\code{internal\_torques\_conserve...} & Coppie casuali sulle ruote: $\vect H_I$ totale conservato (Prop.~\ref{prop:H}).\\
-\code{wheel\_saturation\_is\_exact...} & A coppia massima le ruote raggiungono esattamente 6000 RPM senza superarli; $\vect H_I$ conservato.\\
-\code{power\_and\_energy\_idle} & A coppia nulla $P=N P_s$ ed $E = N P_s t$.\\
-\code{quaternion\_kinematics\_analytic} & Rotazione uniforme attorno a un asse principale: $\q(t) = [\cos\frac{\omega t}{2},0,0,\sin\frac{\omega t}{2}]$.\\
-\code{gravity\_gradient\_zero...} & $\T_{gg}=\vect 0$ con nadir su un asse principale.\\
-\code{pd\_controller\_converges} & Da $90^\circ$ con disturbi: errore $<0.1^\circ$ dopo 80 s.\\
+\code{inertia\_matrix\_3U} & $J$ matches the analytical formula and is symmetric.\\
+\code{torque\_free\_conservation} & Free motion for 100 s: constant $\vect H_I$ ($<10^{-9}$), constant $K$ ($<10^{-7}$ relative), $\norm{\q}=1$.\\
+\code{internal\_torques\_conserve...} & Random wheel torques: total $\vect H_I$ conserved (Prop.~\ref{prop:H}).\\
+\code{wheel\_saturation\_is\_exact...} & At maximum torque the wheels reach exactly 6000 RPM without exceeding it; $\vect H_I$ conserved.\\
+\code{power\_and\_energy\_idle} & At zero torque $P=N P_s$ and $E = N P_s t$.\\
+\code{quaternion\_kinematics\_analytic} & Uniform rotation about a principal axis: $\q(t) = [\cos\frac{\omega t}{2},0,0,\sin\frac{\omega t}{2}]$.\\
+\code{gravity\_gradient\_zero...} & $\T_{gg}=\vect 0$ with nadir along a principal axis.\\
+\code{pd\_controller\_converges} & From $90^\circ$ with disturbances: error $<0.1^\circ$ after 80 s.\\
+\code{torque\_rate\_limit} & Step command: the applied torque changes by at most $\dot T_{max}\Delta t$ per step.\\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\begin{miglioramento}
+\begin{improvement}
 \begin{itemize}[nosep]
-  \item Studio di convergenza in $\Delta t$ (verificare l'ordine 4 di RK4).
-  \item Confronto con un simulatore di riferimento (es. Basilisk, 42) su
-        scenari identici.
-  \item Test dell'instabilità sull'asse intermedio e della precessione libera
-        con soluzioni analitiche di Eulero--Poinsot.
+  \item Convergence study in $\Delta t$ (check the 4th order of RK4).
+  \item Comparison with a reference simulator (e.g. Basilisk, 42) on
+        identical scenarios.
+  \item Tests of the intermediate-axis instability and of free precession
+        against the analytical Euler--Poinsot solutions.
 \end{itemize}
-\end{miglioramento}
+\end{improvement}
 
 % =============================================================================
-\section{Parametri di default}
+\section{Default parameters}
 % =============================================================================
 \begin{center}
 \begin{tabular}{lll}
 \toprule
-Parametro & Valore & Note\\
+Parameter & Value & Notes\\
 \midrule
-Massa, dimensioni & 3 kg, $10\times10\times30$ cm & CubeSat 3U\\
-Prodotti d'inerzia & $(2,-1,1.5)\cdot10^{-5}$ kg\,m$^2$ & $(J_{xy},J_{xz},J_{yz})$\\
-Offset baricentro & $[2,-1,10]$ mm & braccio SRP\\
-$I_{rw}$ & $1.5\cdot10^{-5}$ kg\,m$^2$ & ruota classe CubeSat\\
+Mass, dimensions & 3 kg, $10\times10\times30$ cm & 3U CubeSat\\
+Products of inertia & $(2,-1,1.5)\cdot10^{-5}$ kg\,m$^2$ & $(J_{xy},J_{xz},J_{yz})$\\
+Centre-of-mass offset & $[2,-1,10]$ mm & SRP lever arm\\
+$I_{rw}$ & $1.5\cdot10^{-5}$ kg\,m$^2$ & CubeSat-class wheel\\
 $\Omega_{max}$, $T_{max}$ & 6000 RPM, 2 mN\,m & \\
-$k_1$, $k_2$, $P_s$ & 50 W/(N\,m), 1.2, 0.15 W & modello di potenza\\
-Orbita & 500 km, $i=51.6^\circ$ & circolare\\
-Dipolo residuo & $[5,-3,10]$ mA\,m$^2$ & \\
+Torque rate $\dot T_{max}$ & 8 mN\,m/s & motor driver limit\\
+$k_1$, $k_2$, $P_s$ & 50 W/(N\,m), 1.2, 0.15 W & power model\\
+Orbit & 500 km, $i=51.6^\circ$ & circular\\
+Residual dipole & $[5,-3,10]$ mA\,m$^2$ & \\
 $\rho_s$, $\rho_d$ & 0.1, 0.3 & \\
 $\Delta t$ & 0.05 s & RK4\\
 PD & $\omega_n=0.4$ rad/s, $\zeta=0.9$ & \\
 \bottomrule
 \end{tabular}
 \end{center}
-Tutti i parametri sono definiti come \code{dataclass} in \code{satsim/config.py}.
+All parameters are defined as a \code{dataclass} in \code{satsim/config.py}.
 
 % =============================================================================
-\section{Verso il Reinforcement Learning}
+\section{Towards Reinforcement Learning}
 % =============================================================================
 
-L'engine è già strutturato come un ambiente a tempo discreto:
-$\vect x_{n+1} = \Phi_{RK4}(\vect x_n, \vect u_n)$. Una possibile formulazione
-del problema MDP:
+The engine is already structured as a discrete-time environment:
+$\vect x_{n+1} = \Phi_{RK4}(\vect x_n, \vect u_n)$. A possible formulation
+of the MDP problem (the formulation actually adopted, version by version, is
+documented in \code{rl/README.md}):
 \begin{itemize}
-  \item \textbf{Azione}: $\vect a\in[-1,1]^N$, con $\vect T_{rw} = T_{max}\,\vect a$.
-  \item \textbf{Osservazione}: $[\q_e,\ \w,\ \vect\Omega/\Omega_{max}]$
-        (eventualmente con rumore di sensore). Conviene forzare $q_{e,0}\ge0$
-        per rimuovere l'ambiguità di segno.
-  \item \textbf{Reward}, ad esempio:
+  \item \textbf{Action}: $\vect a\in[-1,1]^N$, with $\vect T_{rw} = T_{max}\,\vect a$.
+  \item \textbf{Observation}: $[\q_e,\ \w,\ \vect\Omega/\Omega_{max}]$
+        (possibly with sensor noise). It is convenient to force $q_{e,0}\ge0$
+        to remove the sign ambiguity.
+  \item \textbf{Reward}, for example:
         \begin{equation}
           r_n = -\alpha\,\theta_{err} - \beta\norm{\w}^2 - \gamma\,P_{tot}\Delta t
                 - \delta\sum_i \max\!\left(0, \tfrac{|\Omega_i|}{\Omega_{max}} - 0.8\right)^2
                 + r_{bonus}\,\mathbb{1}[\theta_{err} < \theta_{tol}],
         \end{equation}
-        che bilancia precisione, stabilità, energia e margine di saturazione.
-  \item \textbf{Episodi}: condizioni iniziali casuali (assetto uniforme su
-        $SO(3)$, \code{random\_quaternion}), velocità di tumbling casuali,
-        parametri randomizzati ($J$, $I_{rw}$, dipolo residuo).
-  \item \textbf{Baseline}: il PD di \S\ref{sec:pd}, da confrontare su tempo di
-        assestamento, energia consumata ed errore a regime.
+        which balances precision, stability, energy and saturation margin.
+  \item \textbf{Episodes}: random initial conditions (attitude uniform on
+        $SO(3)$, \code{random\_quaternion}), random tumbling rates,
+        randomised parameters ($J$, $I_{rw}$, residual dipole).
+  \item \textbf{Baseline}: the PD of \S\ref{sec:pd}, to be compared on settling
+        time, energy consumed and steady-state error.
 \end{itemize}
 
 % =============================================================================
-\section*{Riferimenti bibliografici}
-\addcontentsline{toc}{section}{Riferimenti bibliografici}
+\section*{References}
+\addcontentsline{toc}{section}{References}
 \begin{enumerate}[label={[\arabic*]}]
   \item F.~L.~Markley, J.~L.~Crassidis, \emph{Fundamentals of Spacecraft
         Attitude Determination and Control}, Springer, 2014.

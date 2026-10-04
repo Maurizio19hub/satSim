@@ -1,59 +1,59 @@
 # satSim
 
-**Simulatore 3D del controllo d'assetto di un CubeSat, con un agente di Reinforcement Learning che impara a orientarlo.**
+**3D simulator of the attitude control of a CubeSat, with a Reinforcement Learning agent that learns to point it.**
 
-Un CubeSat 3U nello spazio deve ruotare e puntare con precisione in una direzione data. Lo fa con quattro ruote di reazione: accelerando o frenando un volano, il satellite ruota nel verso opposto.
+A 3U CubeSat in space has to rotate and point precisely in a given direction. It does so with four reaction wheels: when a flywheel is spun up or slowed down, the satellite rotates the opposite way.
 
-satSim simula questo sistema in modo realistico e mostra in 3D cosa succede. Confronta inoltre due modi di controllarlo:
-- un **controllore classico** (PD), progettato a mano;
-- un **agente PPO**, una rete neurale addestrata per prove ed errori che impara da sola a comandare le ruote.
+satSim simulates this system realistically and shows what happens in 3D. It also compares two ways of controlling it:
+- a **classical controller** (PD), designed by hand;
+- a **PPO agent**, a neural network trained by trial and error that learns by itself how to drive the wheels.
 
-## Cosa si può fare
+## What you can do
 
-- **Vedere il satellite in 3D** mentre ruota, con le terne di riferimento, gli assi delle ruote, il Sole e la Terra.
-- **Seguire la telemetria in tempo reale**: errore di puntamento, velocità di rotazione, giri delle ruote, consumo elettrico.
-- **Disturbare il satellite**: perturbazioni improvvise, spinte esterne, ruote che arrivano al limite di giri.
-- **Mettere a confronto l'agente e il controllore classico**, fianco a fianco e partendo dalla stessa situazione.
-- **Addestrare nuovi agenti** e valutarli contro il controllore classico.
+- **Watch the satellite in 3D** as it rotates, with the reference frames, the wheel axes, the Sun and the Earth.
+- **Follow the telemetry in real time**: pointing error, rotation rate, wheel speeds, power consumption.
+- **Disturb the satellite**: sudden perturbations, external pushes, wheels driven to their speed limit.
+- **Compare the agent and the classical controller** side by side, starting from the same situation.
+- **Train new agents** and evaluate them against the classical controller.
 
-## Risultati
+## Results
 
-Media su 10 manovre di prova, partendo da 40–80° dalla direzione voluta:
+Average over 10 test manoeuvres, starting 40–80° away from the target direction:
 
-| | Agente PPO | Controllore PD |
+| | PPO agent | PD controller |
 |---|---|---|
-| Precisione di puntamento finale | **0.0004°** | 0.0031° |
-| Tempo per arrivare entro 1° | **10.4 s** | 12.2 s |
-| Energia consumata | 65.8 J | **61.3 J** |
+| Final pointing accuracy | **0.0004°** | 0.0031° |
+| Time to get within 1° | **10.4 s** | 12.2 s |
+| Energy used | 65.8 J | **61.3 J** |
 
-L'agente è circa 8 volte più preciso e più rapido del controllore classico, con un consumo di poco superiore. Il percorso che ha portato a questo risultato è raccontato nel [registro di sviluppo RL](rl/README.md#9-registro-di-sviluppo-rl).
+The agent is about 8 times more precise and faster than the classical controller, with slightly higher consumption. The path that led to this result is told in the [RL development log](rl/README.md#9-rl-development-log).
 
-## Avvio rapido
+## Quick start
 
-Richiede Python 3.10 o superiore.
+Requires Python 3.10 or later.
 
 ```bash
 pip install -r requirements.txt
 
-python main.py                        # simulazione 3D con il controllore classico
-python main.py --compare --seed 105   # agente PPO (sinistra) contro controllore PD (destra)
-python -m rl.evaluate rl/pretrained/local_training_v4_seed1@3_best   # confronto numerico
+python main.py                        # 3D simulation with the classical controller
+python main.py --compare --seed 105   # PPO agent (left) against the PD controller (right)
+python -m rl.evaluate rl/pretrained/local_training_v4_seed1@3_best   # numerical comparison
 ```
 
-## Com'è fatto
+## How it is built
 
-| Cartella | Contenuto |
+| Folder | Content |
 |---|---|
-| `satsim/` | Il simulatore fisico: dinamica del satellite, ruote, disturbi ambientali, controllore PD. |
-| `gui/` | L'interfaccia grafica 3D e la finestra di confronto. |
-| `rl/` | L'agente: ambiente di addestramento, training, valutazione e modelli già addestrati. |
-| `tests/` | Verifiche automatiche della fisica e dell'ambiente RL. |
+| `satsim/` | The physics simulator: satellite dynamics, wheels, environmental disturbances, PD controller. |
+| `gui/` | The 3D graphical interface and the comparison window. |
+| `rl/` | The agent: training environment, training, evaluation and pre-trained models. |
+| `tests/` | Automatic checks of the physics and of the RL environment. |
 
-Il simulatore è indipendente dall'interfaccia: l'agente si addestra senza grafica e molto più veloce del tempo reale.
+The simulator is independent of the interface: the agent trains without graphics and much faster than real time.
 
-**Tecnologie:** Python, NumPy, PySide6 + pyqtgraph (grafica 3D), Gymnasium e Stable-Baselines3 (Reinforcement Learning).
+**Technologies:** Python, NumPy, PySide6 + pyqtgraph (3D graphics), Gymnasium and Stable-Baselines3 (Reinforcement Learning).
 
-## Documentazione
+## Documentation
 
-- [Documentazione tecnica](DOCUMENTAZIONE_TECNICA.md): modello fisico ed equazioni, architettura, interfaccia, parametri e verifiche.
-- [Reinforcement Learning](rl/README.md): formulazione del problema, reward, addestramento e registro di tutte le versioni dell'agente.
+- [Technical documentation](TECHNICAL_DOCUMENTATION.md): physical model and equations, architecture, interface, parameters and verification.
+- [Reinforcement Learning](rl/README.md): problem formulation, reward, training and the log of every version of the agent.
