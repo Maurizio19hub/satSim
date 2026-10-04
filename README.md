@@ -33,12 +33,46 @@ The agent is about 8 times more precise and faster than the classical controller
 Requires Python 3.10 or later.
 
 ```bash
+git clone https://github.com/Maurizio19hub/satSim.git
+cd satSim
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python main.py                        # 3D simulation with the classical controller
-python main.py --compare --seed 105   # PPO agent (left) against the PD controller (right)
-python -m rl.evaluate rl/pretrained/local_training_v4_seed1@3_best   # numerical comparison
+python -m pytest -q                   # automatic checks (physics + RL)
 ```
+
+## Compare the agent with the classical controller
+
+The best agent so far is included in the repository: `rl/pretrained/local_training_v4_seed1@3_best.zip`. It is the default model of the comparison, so no path is needed.
+
+```bash
+python main.py --compare              # 3D side by side: PPO agent (left) vs PD controller (right), seed 0
+python main.py --compare --seed 105   # another initial condition (any integer seed)
+python -m rl.evaluate rl/pretrained/local_training_v4_seed1@3_best   # numerical comparison on the 10 test manoeuvres
+```
+
+Another model can be loaded with `--model`, e.g. `python main.py --compare --model models/my_model_best`.
+
+## Reproduce the training
+
+The best agent was trained in two stages, 2 + 2 million steps (about 45 minutes each on a 4-core CPU):
+
+```bash
+# 1. Training from scratch, 2 M steps
+python -m rl.train --subproc --seed 1 --out models/local_training_v4_seed1
+
+# 2. Continue the same model for another 2 M steps, with a different seed
+python -m rl.train --subproc --resume models/local_training_v4_seed1 --timesteps 2000000 \
+                   --seed 3 --out models/local_training_v4_seed1@3
+
+# 3. Evaluate the best model saved during training
+python -m rl.evaluate models/local_training_v4_seed1@3_best
+```
+
+- During training the model is checked every 100 000 steps on separate validation manoeuvres, and the best one is saved as `<out>_best.zip`.
+- Learning curves: `tensorboard --logdir runs/ppo_adcs`.
+- Results can differ a little from run to run (different hardware, parallel environments): training is sensitive to the seed, see the [RL development log](rl/README.md#9-rl-development-log).
 
 ## How it is built
 
