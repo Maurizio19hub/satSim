@@ -1,28 +1,28 @@
 """
-Engine fisico del simulatore ADCS — completamente indipendente dalla GUI.
+Physics engine of the ADCS simulator — fully independent of the GUI.
 
-Vettore di stato (dimensione 7 + N + 1):
+State vector (size 7 + N + 1):
 
     x = [ q0 q1 q2 q3 | ωx ωy ωz | Ω1 … ΩN | E ]
 
-    q  : quaternione d'assetto body → inerziale (scalare per primo)
-    ω  : velocità angolare del corpo, espressa in body [rad/s]
-    Ω  : velocità di rotazione assiale delle N ruote [rad/s]
-    E  : energia elettrica consumata dalle ruote [J]
+    q  : attitude quaternion body → inertial (scalar first)
+    ω  : body angular velocity, expressed in body axes [rad/s]
+    Ω  : axial spin rates of the N wheels [rad/s]
+    E  : electrical energy consumed by the wheels [J]
 
-Equazioni implementate (vedi DOCUMENTAZIONE_TECNICA.md per la derivazione):
+Implemented equations (see TECHNICAL_DOCUMENTATION.md for the derivation):
 
-    [1] J  (tensore d'inerzia 3x3 del CubeSat 3U)
-    [2] dΩ/dt = T_rw / I_rw                     (+ saturazione a ±Ω_max,
-                                                 rate limit sulla coppia)
+    [1] J  (3x3 inertia tensor of the 3U CubeSat)
+    [2] dΩ/dt = T_rw / I_rw                     (+ saturation at ±Ω_max,
+                                                 torque rate limit)
         P     = k1|T_rw| + k2|T_rw·Ω| + P_static
     [3] J dω/dt = T_tot − ω × (J ω + h_rw),   h_rw = A · I_rw · Ω
-    [4] dq/dt = ½ q ⊗ [0, ω]                    (+ normalizzazione ad ogni passo)
-    [5] T_tot = T_rw_azione + T_gg + T_srp + T_mag (+ T_manuale)
+    [4] dq/dt = ½ q ⊗ [0, ω]                    (+ normalisation at every step)
+    [5] T_tot = T_rw_action + T_gg + T_srp + T_mag (+ T_manual)
 
-L'integrazione è RK4 a passo fisso; il comando di coppia delle ruote è
-mantenuto costante durante il passo (zero-order hold), come in un
-calcolatore di bordo reale e come in un ambiente Gymnasium.
+Integration is fixed-step RK4; the wheel torque command is held constant
+during the step (zero-order hold), as in a real on-board computer and as in
+a Gymnasium environment.
 """
 from dataclasses import dataclass
 
@@ -37,14 +37,14 @@ RPM_TO_RADS = 2 * np.pi / 60.0
 
 
 # =============================================================================
-# [1] Matrice d'inerzia
+# [1] Inertia matrix
 # =============================================================================
 def cubesat_inertia(mass: float, size, products=(0.0, 0.0, 0.0)) -> np.ndarray:
-    """Tensore d'inerzia di un parallelepipedo omogeneo rispetto al baricentro.
+    """Inertia tensor of a homogeneous box about its centre of mass.
 
         Jxx = m/12 (b² + c²),  Jyy = m/12 (a² + c²),  Jzz = m/12 (a² + b²)
 
-    più eventuali prodotti d'inerzia (convenzione J_ij = −∫ x_i x_j dm).
+    plus optional products of inertia (convention J_ij = −∫ x_i x_j dm).
     """
     a, b, c = size
     jxy, jxz, jyz = products
@@ -53,13 +53,13 @@ def cubesat_inertia(mass: float, size, products=(0.0, 0.0, 0.0)) -> np.ndarray:
         [jxy, mass / 12 * (a**2 + c**2), jyz],
         [jxz, jyz, mass / 12 * (a**2 + b**2)],
     ])
-    # Verifica di consistenza fisica: definita positiva
-    assert np.all(np.linalg.eigvalsh(J) > 0), "J deve essere definita positiva"
+    # Physical consistency check: positive definite
+    assert np.all(np.linalg.eigvalsh(J) > 0), "J must be positive definite"
     return J
 
 
 # =============================================================================
-# [2] Array di ruote di reazione
+# [2] Reaction wheel array
 # =============================================================================
 class ReactionWheelArray:
     def __init__(self, p):
@@ -74,35 +74,35 @@ class ReactionWheelArray:
 
     @staticmethod
     def _spin_axes(config: str, beta: float) -> np.ndarray:
-        """Matrice di distribuzione A: colonna i = asse di rotazione della ruota i in body."""
+        """Distribution matrix A: column i = spin axis of wheel i in body axes."""
         if config == "orthogonal3":
             return np.eye(3)
         if config == "pyramid4":
             phis = np.radians([45, 135, 225, 315])
             return np.array([[np.sin(beta) * np.cos(f), np.sin(beta) * np.sin(f), np.cos(beta)]
                              for f in phis]).T
-        raise ValueError(f"Configurazione ruote sconosciuta: {config}")
+        raise ValueError(f"Unknown wheel configuration: {config}")
 
     def rate_limit(self, tau_prev: np.ndarray, tau_cmd: np.ndarray, dt: float) -> np.ndarray:
-        """Limita la variazione della coppia comandata rispetto al passo precedente.
+        """Limits the change of the commanded torque relative to the previous step.
 
-            |T(t+dt) − T(t)| ≤ dT_max = max_torque_rate · dt     (per ruota)
+            |T(t+dt) − T(t)| ≤ dT_max = max_torque_rate · dt     (per wheel)
 
-        Modella il driver del motore, che non può cambiare la corrente (∝ coppia)
-        istantaneamente. Il comando è prima limitato a ±T_max.
+        Models the motor driver, which cannot change the current (∝ torque)
+        instantaneously. The command is first limited to ±T_max.
         """
         tau = np.clip(tau_cmd, -self.tau_max, self.tau_max)
         d_max = self.tau_rate_max * dt
         return tau_prev + np.clip(tau - tau_prev, -d_max, d_max)
 
     def limit_torque(self, tau_cmd: np.ndarray, omega_w: np.ndarray, dt: float) -> np.ndarray:
-        """Applica i limiti fisici al comando di coppia motore.
+        """Applies the physical limits to the motor torque command.
 
         1) |T_rw| ≤ T_max
-        2) saturazione in velocità: poiché dΩ/dt = T/I_rw e T è costante sul
-           passo, Ω(t+dt) = Ω + T·dt/I_rw esattamente. Si limita quindi T
-           in modo che |Ω(t+dt)| ≤ Ω_max: la ruota non supera mai il limite
-           e il momento angolare totale resta conservato (niente clipping).
+        2) speed saturation: since dΩ/dt = T/I_rw and T is constant over the
+           step, Ω(t+dt) = Ω + T·dt/I_rw exactly. T is therefore limited so
+           that |Ω(t+dt)| ≤ Ω_max: the wheel never exceeds the limit and the
+           total angular momentum is conserved (no clipping).
         """
         tau = np.clip(tau_cmd, -self.tau_max, self.tau_max)
         tau_hi = (self.omega_max - omega_w) * self.I_rw / dt
@@ -110,17 +110,17 @@ class ReactionWheelArray:
         return np.clip(tau, tau_lo, tau_hi)
 
     def power(self, tau: np.ndarray, omega_w: np.ndarray) -> np.ndarray:
-        """P_i = k1|T_i| + k2|T_i·Ω_i| + P_static   [W] per ogni ruota."""
+        """P_i = k1|T_i| + k2|T_i·Ω_i| + P_static   [W] for each wheel."""
         p = self.p
         return p.k1 * np.abs(tau) + p.k2 * np.abs(tau * omega_w) + p.p_static
 
     def momentum_body(self, omega_w: np.ndarray) -> np.ndarray:
-        """h_rw = A · I_rw · Ω  [N·m·s] nel riferimento body."""
+        """h_rw = A · I_rw · Ω  [N·m·s] in the body frame."""
         return self.A @ (self.I_rw * omega_w)
 
 
 # =============================================================================
-# Telemetria restituita ad ogni passo
+# Telemetry returned at every step
 # =============================================================================
 @dataclass
 class Telemetry:
@@ -133,23 +133,23 @@ class Telemetry:
     omega_dot: np.ndarray
     wheel_speed: np.ndarray       # [rad/s]
     wheel_rpm: np.ndarray
-    wheel_saturation: np.ndarray  # frazione 0..1 di Ω_max
-    wheel_torque_cmd: np.ndarray  # comando richiesto [N·m]
-    wheel_torque: np.ndarray      # coppia effettivamente applicata [N·m]
+    wheel_saturation: np.ndarray  # fraction 0..1 of Ω_max
+    wheel_torque_cmd: np.ndarray  # requested command [N·m]
+    wheel_torque: np.ndarray      # torque actually applied [N·m]
     wheel_accel: np.ndarray       # dΩ/dt [rad/s²]
-    h_rw: np.ndarray              # momento angolare ruote (body)
-    H_inertial: np.ndarray        # momento angolare totale (inerziale)
-    T_rw_body: np.ndarray         # coppia di reazione sul corpo
+    h_rw: np.ndarray              # wheel angular momentum (body)
+    H_inertial: np.ndarray        # total angular momentum (inertial)
+    T_rw_body: np.ndarray         # reaction torque on the body
     T_gg: np.ndarray
     T_srp: np.ndarray
     T_mag: np.ndarray
     T_manual: np.ndarray
     T_total: np.ndarray
-    power_wheels: np.ndarray      # [W] per ruota
+    power_wheels: np.ndarray      # [W] per wheel
     power_total: float            # [W]
     energy: float                 # [J]
     eclipse: bool
-    r_inertial: np.ndarray        # posizione orbitale [m]
+    r_inertial: np.ndarray        # orbital position [m]
 
 
 # =============================================================================
@@ -168,7 +168,7 @@ class SatelliteEngine:
         self.n_state = 7 + self.rw.n + 1
         self.reset()
 
-    # ------------------------------------------------------------- stato
+    # ------------------------------------------------------------- state
     def reset(self, q0=None, omega0=None, wheel_speed0=None) -> Telemetry:
         self.t = 0.0
         x = np.zeros(self.n_state)
@@ -176,7 +176,7 @@ class SatelliteEngine:
         x[4:7] = omega0 if omega0 is not None else 0.0
         x[7:7 + self.rw.n] = wheel_speed0 if wheel_speed0 is not None else 0.0
         self.x = x
-        self.tau_cmd = np.zeros(self.rw.n)     # ultima coppia comandata (per il rate limit)
+        self.tau_cmd = np.zeros(self.rw.n)     # last commanded torque (for the rate limit)
         zeros = np.zeros(self.rw.n)
         return self._telemetry(zeros, zeros, np.zeros(3))
 
@@ -199,42 +199,42 @@ class SatelliteEngine:
     def set_attitude(self, q):
         self.x[0:4] = quat_normalize(np.asarray(q, float))
 
-    # ------------------------------------------------------ allocazione
+    # ------------------------------------------------------- allocation
     def allocate(self, T_body_cmd: np.ndarray) -> np.ndarray:
-        """Converte una coppia desiderata sul corpo in coppie motore delle ruote.
+        """Converts a desired body torque into wheel motor torques.
 
-        La reazione sul corpo è T_body = −A·T_rw, quindi T_rw = −A⁺·T_body
-        (pseudo-inversa di Moore-Penrose: soluzione a minima norma, utile
-        con 4 ruote ridondanti).
+        The reaction on the body is T_body = −A·T_rw, hence T_rw = −A⁺·T_body
+        (Moore-Penrose pseudo-inverse: minimum-norm solution, useful with
+        4 redundant wheels).
         """
         return -self.rw.A_pinv @ T_body_cmd
 
-    # ------------------------------------------------------- dinamica
+    # --------------------------------------------------------- dynamics
     def _derivatives(self, t, x, tau_w, T_manual):
-        """f(t, x, u) — secondo membro del sistema di ODE."""
+        """f(t, x, u) — right-hand side of the ODE system."""
         n = self.rw.n
         q = x[0:4]
         w = x[4:7]
         Om = x[7:7 + n]
-        qn = q / np.linalg.norm(q)          # le coppie usano l'assetto normalizzato
+        qn = q / np.linalg.norm(q)          # the torques use the normalised attitude
 
-        # [5] Disturbi ambientali (valutati ad ogni stadio RK4)
+        # [5] Environmental disturbances (evaluated at every RK4 stage)
         R_bi = quat_to_dcm(qn)
         d = self.env.disturbance_torques(t, R_bi, self.J)
         T_rw_body = -self.rw.A @ tau_w
         T_total = T_rw_body + d["gg"] + d["srp"] + d["mag"] + T_manual
 
-        # [2] Ruote: dΩ/dt = T_rw / I_rw
+        # [2] Wheels: dΩ/dt = T_rw / I_rw
         Om_dot = tau_w / self.rw.I_rw
 
-        # [3] Eulero con accoppiamento giroscopico
+        # [3] Euler with gyroscopic coupling
         h = self.rw.A @ (self.rw.I_rw * Om)
         w_dot = self.J_inv @ (T_total - cross3(w, self.J @ w + h))
 
-        # [4] Cinematica: dq/dt = ½ q ⊗ [0, ω]
+        # [4] Kinematics: dq/dt = ½ q ⊗ [0, ω]
         q_dot = 0.5 * quat_mult(q, np.concatenate(([0.0], w)))
 
-        # Potenza elettrica → dE/dt = P
+        # Electrical power → dE/dt = P
         P = self.rw.power(tau_w, Om).sum()
 
         xdot = np.concatenate((q_dot, w_dot, Om_dot, [P]))
@@ -242,14 +242,14 @@ class SatelliteEngine:
         return xdot, aux
 
     def step(self, tau_wheel_cmd=None, T_manual=None) -> Telemetry:
-        """Avanza la simulazione di un passo dt con integrazione RK4.
+        """Advances the simulation by one step dt with RK4 integration.
 
-        tau_wheel_cmd : coppie motore richieste alle N ruote [N·m]
-        T_manual      : coppia di disturbo esterna aggiuntiva (body) [N·m]
+        tau_wheel_cmd : motor torques requested from the N wheels [N·m]
+        T_manual      : additional external disturbance torque (body) [N·m]
 
-        La coppia richiesta passa per tre limiti, nell'ordine:
-        |T| ≤ T_max, variazione ≤ max_torque_rate·dt rispetto al passo
-        precedente, saturazione in velocità delle ruote.
+        The requested torque goes through three limits, in this order:
+        |T| ≤ T_max, change ≤ max_torque_rate·dt relative to the previous
+        step, wheel speed saturation.
         """
         n = self.rw.n
         tau_cmd = np.zeros(n) if tau_wheel_cmd is None else np.asarray(tau_wheel_cmd, float)
@@ -264,16 +264,16 @@ class SatelliteEngine:
         k4, _ = self._derivatives(t + dt, x + dt * k3, tau, T_manual)
         x_new = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
 
-        # Normalizzazione del quaternione (vincolo ‖q‖ = 1)
+        # Quaternion normalisation (constraint ‖q‖ = 1)
         x_new[0:4] = quat_normalize(x_new[0:4])
-        # Rete di sicurezza numerica (limit_torque rende Ω esatto già entro Ω_max)
+        # Numerical safety net (limit_torque already keeps Ω exactly within Ω_max)
         x_new[7:7 + n] = np.clip(x_new[7:7 + n], -self.rw.omega_max, self.rw.omega_max)
 
         self.x = x_new
         self.t = t + dt
         return self._telemetry(tau_cmd, tau, T_manual)
 
-    # ----------------------------------------------------- telemetria
+    # -------------------------------------------------------- telemetry
     def _telemetry(self, tau_cmd, tau, T_manual) -> Telemetry:
         xdot, aux = self._derivatives(self.t, self.x, tau, T_manual)
         q, w, Om = self.q, self.omega, self.wheel_speed

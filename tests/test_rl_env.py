@@ -1,4 +1,4 @@
-"""Verifiche dell'ambiente RL e della separazione training / GUI."""
+"""Checks of the RL environment and of the training / GUI separation."""
 import subprocess
 import sys
 
@@ -15,7 +15,7 @@ GUI_MODULES = ("PySide6", "pyqtgraph", "OpenGL", "gui")
 
 
 def test_training_is_headless():
-    """Importare lo script di training non deve caricare nessun modulo grafico."""
+    """Importing the training script must not load any graphical module."""
     code = ("import sys, rl.train; "
             f"print([m for m in {GUI_MODULES!r} if m in sys.modules])")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
@@ -32,20 +32,20 @@ def test_action_is_rate_limited_torque_change():
     obs, _ = env.reset(seed=0)
     n = env.n_wheels
     assert obs.shape == (6 + 2 * n,)
-    T = slice(6, 6 + n)                                   # coppia corrente nell'osservazione
-    np.testing.assert_array_equal(obs[T], 0.0)            # coppia iniziale nulla
+    T = slice(6, 6 + n)                                   # current torque in the observation
+    np.testing.assert_array_equal(obs[T], 0.0)            # zero initial torque
 
-    # Azione massima per un passo: la coppia sale di Δτ_max = max_torque_rate · Δt
+    # Maximum action for one step: the torque rises by Δτ_max = max_torque_rate · Δt
     np.testing.assert_allclose(env.dtau_max, 0.2 * env.tau_max)
     obs, *_ = env.step(np.ones(n, dtype=np.float32))
     np.testing.assert_allclose(obs[T], env.dtau_max / env.tau_max, rtol=1e-6)
 
-    # Dopo molti passi resta limitata a ±T_max
+    # After many steps it stays limited to ±T_max
     for _ in range(20):
         obs, *_ = env.step(np.ones(n, dtype=np.float32))
     np.testing.assert_allclose(obs[T], 1.0, rtol=1e-6)
 
-    # Azione nulla: la coppia resta invariata
+    # Zero action: the torque is unchanged
     obs2, *_ = env.step(np.zeros(n, dtype=np.float32))
     np.testing.assert_allclose(obs2[T], obs[T])
 
@@ -53,7 +53,7 @@ def test_action_is_rate_limited_torque_change():
 def test_reward_is_bonus_on_target_at_rest():
     env = SatAttitudeEnv()
     env.reset(seed=0)
-    env.engine.reset()                     # assetto = target, ω = 0
+    env.engine.reset()                     # attitude = target, ω = 0
     env._prev_omega = env.engine.omega
     env._tau[:] = 0.0
     _, r, *_ = env.step(np.zeros(env.n_wheels, dtype=np.float32))
@@ -67,7 +67,7 @@ def test_null_space_penalty():
     env.reset(seed=0)
     c = env.reward_config
     rw = env.engine.rw
-    null_dir = np.linalg.svd(rw.A)[2][-1]                 # (±1/2, ...): combinazione (+,−,+,−)
+    null_dir = np.linalg.svd(rw.A)[2][-1]                 # (±1/2, ...): (+,−,+,−) combination
     range_dir = rw.A_pinv @ np.array([0.0, 0.0, 1.0])
     range_dir /= np.abs(range_dir).max()
     a = np.zeros(4)
@@ -76,8 +76,8 @@ def test_null_space_penalty():
         return env._compute_reward(SimpleNamespace(att_err_deg=0.0, wheel_speed=w), a)
 
     r0 = r(np.zeros(4))
-    assert abs(r(0.9 * env.omega_w_max * range_dir) - r0) < 1e-9     # velocità utile: nessuna penalità
-    drift = 0.5                                                       # ogni ruota a 0.5·Ω_max di deriva
+    assert abs(r(0.9 * env.omega_w_max * range_dir) - r0) < 1e-9     # useful speed: no penalty
+    drift = 0.5                                                       # each wheel drifting at 0.5·Ω_max
     w = 2 * drift * env.omega_w_max * null_dir
     np.testing.assert_allclose(np.abs(w) / env.omega_w_max, drift)
     assert abs((r0 - r(w)) - c["k_null"] * drift) < 1e-9
@@ -90,14 +90,14 @@ def test_log_attitude_error():
     for deg in (0.01, 0.1, 0.45, 10, 60, 179.9):
         e = log_attitude_error(quat_from_axis_angle(axis, np.radians(deg)))
         g = np.linalg.norm(e)
-        np.testing.assert_allclose(e / g, axis, atol=1e-9)    # direzione = asse
-        assert prev < g <= 1.0                                 # monotona, limitata
+        np.testing.assert_allclose(e / g, axis, atol=1e-9)    # direction = axis
+        assert prev < g <= 1.0                                 # monotonic, bounded
         prev = g
     assert np.linalg.norm(log_attitude_error(quat_from_axis_angle(axis, np.radians(0.45)))) > 0.2
 
 
 def test_comparison_matches_evaluate():
-    """La modalità confronto (rl/compare.py) riproduce rl/evaluate.py episodio per episodio."""
+    """The comparison mode (rl/compare.py) reproduces rl/evaluate.py episode by episode."""
     from rl.compare import Comparison
     from rl.evaluate import evaluate
     c = Comparison("rl/pretrained/local_training_v4_seed1@3_best", seed=105)
@@ -118,8 +118,8 @@ def _serialized_functions(zip_path) -> list:
 
 
 def test_saved_models_are_portable(tmp_path):
-    """Nessuna funzione Python serializzata nei modelli: il bytecode cambia tra
-    versioni di Python (3.11 → 3.14 dava segmentation fault al caricamento)."""
+    """No serialised Python functions in the models: bytecode changes between
+    Python versions (3.11 → 3.14 caused a segmentation fault on loading)."""
     from pathlib import Path
     from stable_baselines3 import PPO
     from rl.train import PPO_CONFIG
@@ -131,7 +131,7 @@ def test_saved_models_are_portable(tmp_path):
 
 
 def test_wheel_speed_in_observation():
-    """v9: le ultime N componenti sono Ω/Ω_max dalla telemetria; v8 senza."""
+    """v9: the last N components are Ω/Ω_max from the telemetry; v8 has none."""
     env = SatAttitudeEnv()
     env.reset(seed=0)
     for _ in range(30):
@@ -143,7 +143,7 @@ def test_wheel_speed_in_observation():
 
 
 def test_old_models_still_load():
-    """Il modello v8 (osservazione senza ruote) viene associato all'ambiente giusto."""
+    """The v8 model (observation without wheels) is matched to the right environment."""
     from rl.models import env_kwargs_for, load_model
     assert env_kwargs_for(load_model("rl/pretrained/ppo_adcs_v8")) == {"wheel_speed_obs": False}
 
@@ -153,15 +153,15 @@ def test_null_space_share():
     env = SatAttitudeEnv()
     rw = env.engine.rw
     P = rw.A_pinv @ rw.A
-    null_dir = np.linalg.svd(rw.A)[2][-1]                 # direzione nello spazio nullo
-    range_dir = rw.A_pinv @ np.array([0.0, 0.0, 1.0])     # direzione che produce momento
+    null_dir = np.linalg.svd(rw.A)[2][-1]                 # direction in the null space
+    range_dir = rw.A_pinv @ np.array([0.0, 0.0, 1.0])     # direction that produces momentum
     assert null_space_share(P, 100 * null_dir) > 0.999
     assert null_space_share(P, 100 * range_dir) < 1e-6
     assert np.isnan(null_space_share(P, np.zeros(4)))
 
 
 def test_validation_schedule_after_resume():
-    """Con --resume la prima validazione cade eval_every passi dopo la ripresa."""
+    """With --resume the first validation comes eval_every steps after resuming."""
     from pathlib import Path
     from types import SimpleNamespace
     from rl.train import BestModelCallback

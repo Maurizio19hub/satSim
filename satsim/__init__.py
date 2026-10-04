@@ -1,4 +1,4 @@
-"""satSim — simulatore di controllo d'assetto (ADCS) per CubeSat con ruote di reazione."""
+"""satSim — attitude determination and control (ADCS) simulator for a CubeSat with reaction wheels."""
 from .config import SimParams
 from .controller import QuaternionPDController
 from .physics_engine import SatelliteEngine, Telemetry

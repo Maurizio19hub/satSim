@@ -1,14 +1,14 @@
 """
-Valutazione di un modello PPO addestrato contro i riferimenti (PD, satellite
-libero, azioni casuali) sugli stessi episodi di confronto.
+Evaluation of a trained PPO model against the baselines (PD, free
+satellite, random actions) on the same comparison episodes.
 
-Il PD comanda la stessa azione dell'agente (variazione di coppia con lo stesso
-rate limit), quindi il confronto è alla pari. La policy PPO è valutata in modo
-deterministico (azione media, senza rumore di esplorazione).
+The PD issues the same action as the agent (torque change with the same
+rate limit), so the comparison is fair. The PPO policy is evaluated
+deterministically (mean action, no exploration noise).
 
-Uso:
-    python -m rl.evaluate                          # solo riferimenti
-    python -m rl.evaluate models/ppo_adcs          # modello + riferimenti
+Usage:
+    python -m rl.evaluate                          # baselines only
+    python -m rl.evaluate models/ppo_adcs          # model + baselines
 """
 from __future__ import annotations
 
@@ -19,12 +19,12 @@ import numpy as np
 from rl.adcs_env import SatAttitudeEnv
 from satsim.controller import QuaternionPDController
 
-EVAL_SEEDS = range(100, 110)    # 10 episodi di confronto
-SUCCESS_ERR_DEG = 0.01          # criterio di successo sull'errore finale [°]
+EVAL_SEEDS = range(100, 110)    # 10 comparison episodes
+SUCCESS_ERR_DEG = 0.01          # success criterion on the final error [°]
 
 
 def pd_action(env: SatAttitudeEnv, pd: QuaternionPDController) -> np.ndarray:
-    """Azione (variazione di coppia normalizzata) che insegue la coppia del PD."""
+    """Action (normalised torque change) that tracks the PD torque."""
     e = env.engine
     tau_pd = e.allocate(pd.compute(e.q, e.omega, e.h_rw, e.q_target))
     tau_pd = np.clip(tau_pd, -env.tau_max, env.tau_max)
@@ -32,9 +32,9 @@ def pd_action(env: SatAttitudeEnv, pd: QuaternionPDController) -> np.ndarray:
 
 
 def null_space_share(proj_range: np.ndarray, omega_w: np.ndarray) -> float:
-    """Quota (0–1) dell'energia cinetica delle ruote nello spazio nullo della piramide,
-    cioè in combinazioni (+,−,+,−) che non producono momento sul corpo: 1 − |P·Ω|²/|Ω|²,
-    con P = A⁺A proiettore sullo spazio immagine di Aᵀ."""
+    """Share (0–1) of the wheels' kinetic energy in the null space of the pyramid,
+    i.e. in (+,−,+,−) combinations that produce no momentum on the body: 1 − |P·Ω|²/|Ω|²,
+    with P = A⁺A the projector onto the range of Aᵀ."""
     n2 = float(omega_w @ omega_w)
     if n2 < 1e-12:
         return float("nan")
@@ -49,9 +49,9 @@ def run_episode(env: SatAttitudeEnv, seed: int, policy) -> dict:
     for k in range(env.max_episode_steps):
         if policy == "PD":
             a = pd_action(env, pd)
-        elif policy == "libero":
+        elif policy == "free":
             a = np.zeros(env.n_wheels)
-        elif policy == "casuale":
+        elif policy == "random":
             a = rng.uniform(-1.0, 1.0, env.n_wheels)
         else:
             a, _ = policy.predict(obs, deterministic=True)
@@ -72,7 +72,7 @@ def run_episode(env: SatAttitudeEnv, seed: int, policy) -> dict:
 
 def evaluate(policy, seeds=EVAL_SEEDS) -> dict:
     kwargs = {}
-    if not isinstance(policy, str):          # modello SB3: ambiente con la sua osservazione
+    if not isinstance(policy, str):          # SB3 model: environment with its observation
         from rl.models import env_kwargs_for
         kwargs = env_kwargs_for(policy)
     env = SatAttitudeEnv(**kwargs)
@@ -86,7 +86,7 @@ def _nanmean(x: np.ndarray) -> float:
 
 def print_table(results: dict):
     print(f"{'':>10} {'reward':>9} {'err fin [°]':>12} {'err max [°]':>12} "
-          f"{'t<1° [s]':>9} {'|α|max':>7} {'energia [J]':>11} {'Ω picco [RPM]':>14} {'spazio nullo':>13}")
+          f"{'t<1° [s]':>9} {'|α|max':>7} {'energy [J]':>11} {'Ω peak [RPM]':>14} {'null space':>13}")
     for name, v in results.items():
         print(f"{name:>10} {v['ret'].mean():>9.1f} {v['err'].mean():>12.4f} "
               f"{v['err'].max():>12.4f} {_nanmean(v['t_1deg']):>9.1f} "
@@ -96,8 +96,8 @@ def print_table(results: dict):
 
 
 def print_wheel_details(results: dict):
-    """Per seed: picco di |Ω| [RPM] e quota nello spazio nullo a fine episodio."""
-    print("\nRuote per seed (picco RPM / quota spazio nullo a fine episodio):")
+    """Per seed: peak |Ω| [RPM] and null-space share at the end of the episode."""
+    print("\nWheels per seed (peak RPM / null-space share at the end of the episode):")
     for name in ("PPO", "PD"):
         if name in results:
             v = results[name]
@@ -106,14 +106,14 @@ def print_wheel_details(results: dict):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("model", nargs="?", help="modello da valutare (es. models/ppo_adcs)")
+    ap.add_argument("model", nargs="?", help="model to evaluate (e.g. models/ppo_adcs)")
     a = ap.parse_args()
 
     results = {}
     if a.model:
         from rl.models import load_model
         results["PPO"] = evaluate(load_model(a.model))
-    for name in ("PD", "libero", "casuale"):
+    for name in ("PD", "free", "random"):
         results[name] = evaluate(name)
     print_table(results)
     print_wheel_details(results)
@@ -122,7 +122,7 @@ def main():
         ppo, pd = results["PPO"], results["PD"]
         checks = {
             "reward ≥ PD": ppo["ret"].mean() >= pd["ret"].mean(),
-            f"errore finale ≤ {SUCCESS_ERR_DEG}° su tutti i seed": bool((ppo["err"] <= SUCCESS_ERR_DEG).all()),
+            f"final error ≤ {SUCCESS_ERR_DEG}° on all seeds": bool((ppo["err"] <= SUCCESS_ERR_DEG).all()),
         }
         for k, ok in checks.items():
             print(f"[{'OK' if ok else '--'}] {k}")

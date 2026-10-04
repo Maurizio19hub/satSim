@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-satSim — simulatore visuale ADCS per CubeSat 3U con ruote di reazione.
+satSim — visual ADCS simulator for a 3U CubeSat with reaction wheels.
 
-Uso:
-    python main.py                       # 4 ruote in piramide, tempo reale
-    python main.py --wheels 3 --speed 5  # 3 ruote ortogonali, 5x tempo reale
-    python main.py --compare --seed 101  # confronto PPO (sinistra) vs PD (destra)
+Usage:
+    python main.py                       # 4 wheels in a pyramid, real time
+    python main.py --wheels 3 --speed 5  # 3 orthogonal wheels, 5x real time
+    python main.py --compare --seed 101  # PPO (left) vs PD (right) comparison
 """
 import argparse
 import sys
@@ -21,15 +21,15 @@ from satsim.simulation import ClosedLoopSimulation
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--wheels", type=int, choices=(3, 4), default=4,
-                    help="3 = ortogonali, 4 = piramide (default)")
-    ap.add_argument("--dt", type=float, default=0.05, help="passo RK4 [s] (default 0.05)")
-    ap.add_argument("--speed", type=float, default=1.0, help="fattore tempo reale iniziale")
-    ap.add_argument("--seed", type=int, default=None, help="seed per le condizioni iniziali")
+                    help="3 = orthogonal, 4 = pyramid (default)")
+    ap.add_argument("--dt", type=float, default=0.05, help="RK4 step [s] (default 0.05)")
+    ap.add_argument("--speed", type=float, default=1.0, help="initial real-time factor")
+    ap.add_argument("--seed", type=int, default=None, help="seed for the initial conditions")
     ap.add_argument("--compare", action="store_true",
-                    help="confronto PPO vs PD sulla stessa condizione iniziale\n"
-                         "(richiede gymnasium e stable-baselines3)")
+                    help="PPO vs PD comparison from the same initial condition\n"
+                         "(requires gymnasium and stable-baselines3)")
     ap.add_argument("--model", default="rl/pretrained/local_training_v4_seed1@3_best",
-                    help="modello PPO per --compare (default rl/pretrained/local_training_v4_seed1@3_best)")
+                    help="PPO model for --compare (default rl/pretrained/local_training_v4_seed1@3_best)")
     return ap.parse_args()
 
 
@@ -43,7 +43,7 @@ def main():
     apply_dark_palette(app)
 
     if args.compare:
-        # Import solo in questa modalità: la GUI normale non richiede le librerie RL.
+        # Imported only in this mode: the normal GUI does not need the RL libraries.
         from gui.compare_window import CompareWindow
         win = CompareWindow(args.model, seed=args.seed or 0, speed=args.speed)
     else:

@@ -1,11 +1,10 @@
 """
-Confronto passo-passo tra l'agente PPO e il controllore PD sulla stessa
-condizione iniziale (stesso seed), senza dipendenze grafiche.
+Step-by-step comparison between the PPO agent and the PD controller from the same
+initial condition (same seed), with no graphical dependencies.
 
-Entrambi i controllori girano in un SatAttitudeEnv: stessa fisica, stessi
-disturbi, stesso limite di variazione della coppia (imposto dal motore) e
-stessa reward. La GUI di confronto (gui/compare_window.py) si limita a
-visualizzare lo stato di questa classe.
+Both controllers run in a SatAttitudeEnv: same physics, same disturbances,
+same torque rate limit (enforced by the motor) and same reward. The
+comparison GUI (gui/compare_window.py) only displays the state of this class.
 """
 from __future__ import annotations
 
@@ -23,14 +22,14 @@ IMPULSE_DURATION = 1.0      # [s]
 
 
 class ControllerRun:
-    """Un satellite controllato da `policy` ("PD" oppure un modello SB3)."""
+    """A satellite controlled by `policy` ("PD" or an SB3 model)."""
 
     FIELDS = ("t", "err", "w", "alpha", "rpm", "power")
 
     def __init__(self, name: str, policy):
         self.name, self.policy = name, policy
         kwargs = {}
-        if policy != "PD":                   # ambiente con l'osservazione del modello
+        if policy != "PD":                   # environment with the model's observation
             from rl.models import env_kwargs_for
             kwargs = env_kwargs_for(policy)
         self.env = SatAttitudeEnv(**kwargs)
@@ -70,7 +69,7 @@ class ControllerRun:
     def _record(self, info: dict):
         h, tel = self.hist, self.tel
         h["t"].append(tel.t)
-        h["err"].append(max(tel.att_err_deg, 1e-5))         # > 0 per la scala log
+        h["err"].append(max(tel.att_err_deg, 1e-5))         # > 0 for the log scale
         h["w"].append(np.degrees(np.linalg.norm(tel.omega)))
         h["alpha"].append(float(np.abs(info["alpha_deg"]).max()))
         h["rpm"].append(float(np.abs(tel.wheel_rpm).max()))
@@ -81,7 +80,7 @@ class ControllerRun:
 
 
 class Comparison:
-    """Due satelliti (PPO a sinistra, PD a destra) che avanzano insieme."""
+    """Two satellites (PPO on the left, PD on the right) stepping together."""
 
     def __init__(self, model_path: str = DEFAULT_MODEL, seed: int = 0):
         from rl.models import load_model
@@ -111,7 +110,7 @@ class Comparison:
         self.omega0 = np.degrees(np.linalg.norm(w))
 
     def apply_impulse(self, rng: np.random.Generator | None = None):
-        """Stessa coppia esterna (direzione casuale, 5 mN·m per 1 s) su entrambi."""
+        """Same external torque (random direction, 5 mN·m for 1 s) on both."""
         rng = rng or np.random.default_rng()
         d = rng.normal(size=3)
         T = IMPULSE_TORQUE * d / np.linalg.norm(d)

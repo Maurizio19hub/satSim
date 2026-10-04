@@ -1,17 +1,17 @@
 """
-Tema grafico condiviso dalle finestre della GUI (simulazione e confronto).
+Graphical theme shared by the GUI windows (simulation and comparison).
 
-Un solo posto per colori, foglio di stile Qt (QSS), icone e stile dei
-grafici pyqtgraph: le finestre usano solo apply_theme(), icon() e
+A single place for colours, the Qt style sheet (QSS), icons and the style of
+the pyqtgraph plots: the windows only use apply_theme(), icon() and
 style_plot().
 """
 import pyqtgraph as pg
 from PySide6.QtGui import QColor, QFont, QIcon, QPalette
 
 # --- Palette ----------------------------------------------------------------
-BG = "#111318"          # sfondo finestra
-SURFACE = "#191c23"     # card / pannelli
-SURFACE_2 = "#222632"   # controlli (pulsanti, campi)
+BG = "#111318"          # window background
+SURFACE = "#191c23"     # cards / panels
+SURFACE_2 = "#222632"   # controls (buttons, fields)
 SURFACE_3 = "#2b3040"   # hover
 BORDER = "#2c3140"
 TEXT = "#e6e8ee"
@@ -42,7 +42,7 @@ QLabel#cardTitle {{ color: {MUTED}; font-size: 9pt; font-weight: 600; }}
 QLabel#muted {{ color: {MUTED}; }}
 QLabel#h1 {{ font-size: 14pt; font-weight: 700; }}
 
-/* Pulsanti */
+/* Buttons */
 QPushButton {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 8px;
     padding: 6px 14px; color: {TEXT}; }}
 QPushButton:hover {{ background: {SURFACE_3}; }}
@@ -54,7 +54,7 @@ QPushButton[variant="warning"] {{ border-color: {WARNING}; color: {WARNING}; }}
 QPushButton[segment="true"] {{ border-radius: 0; padding: 6px 10px; margin: 0; }}
 QPushButton:checked {{ background: {ACCENT}; border-color: {ACCENT}; color: white; }}
 
-/* Campi */
+/* Fields */
 QSpinBox, QComboBox {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 8px;
     padding: 5px 8px; min-height: 18px; }}
 QSpinBox:focus, QComboBox:focus {{ border-color: {ACCENT}; }}
@@ -68,18 +68,18 @@ QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QSlider::groove:horizontal {{ height: 4px; background: {SURFACE_3}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ width: 14px; margin: -6px 0; border-radius: 7px; background: {ACCENT}; }}
 
-/* Barre */
+/* Bars */
 QProgressBar {{ background: {SURFACE_2}; border: none; border-radius: 5px; height: 10px;
     text-align: center; color: {TEXT}; font-size: 8pt; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 5px; }}
 
-/* Chip di stato */
+/* Status chips */
 QLabel#chip {{ border-radius: 10px; padding: 3px 10px; font-weight: 600; font-size: 9pt; }}
 QLabel#chip[state="run"] {{ background: rgba(60,207,145,0.15); color: {SUCCESS}; }}
 QLabel#chip[state="pause"] {{ background: rgba(245,185,66,0.15); color: {WARNING}; }}
 QLabel#chip[state="done"] {{ background: rgba(79,140,255,0.18); color: {ACCENT}; }}
 
-/* Varie */
+/* Miscellaneous */
 QSplitter::handle {{ background: {BG}; }}
 QSplitter::handle:horizontal {{ width: 6px; }}
 QSplitter::handle:vertical {{ height: 6px; }}
@@ -93,7 +93,7 @@ QPlainTextEdit {{ background: {SURFACE}; border: none; color: {TEXT}; }}
 
 
 def apply_theme(app):
-    """Applica stile Fusion, palette scura e foglio di stile all'applicazione."""
+    """Applies the Fusion style, dark palette and style sheet to the application."""
     app.setStyle("Fusion")
     pal = QPalette()
     for role, c in ((QPalette.Window, BG), (QPalette.WindowText, TEXT), (QPalette.Base, SURFACE),
@@ -108,8 +108,8 @@ def apply_theme(app):
 
 
 def icon(name: str, color: str = TEXT) -> QIcon:
-    """Icona vettoriale (QtAwesome, set Material Design). Icona vuota se la
-    libreria non è installata: la GUI resta utilizzabile."""
+    """Vector icon (QtAwesome, Material Design set). Empty icon if the
+    library is not installed: the GUI stays usable."""
     try:
         import qtawesome as qta
         return qta.icon(name, color=color)
@@ -118,7 +118,7 @@ def icon(name: str, color: str = TEXT) -> QIcon:
 
 
 def style_plot(p: pg.PlotItem, title: str, units: str = ""):
-    """Stile uniforme dei grafici: titolo, assi e griglia discreti."""
+    """Uniform plot style: subtle title, axes and grid."""
     p.setTitle(title, color=TEXT, size="10pt")
     p.showGrid(x=True, y=True, alpha=0.12)
     for ax in ("left", "bottom"):

@@ -1,8 +1,8 @@
 """
-Finestra principale: collega la simulazione (satsim) ai widget di visualizzazione.
+Main window: connects the simulation (satsim) to the display widgets.
 
-La GUI non contiene fisica: legge solo la telemetria e invia comandi
-(pausa, coppie manuali, abilitazione disturbi/controllore).
+The GUI contains no physics: it only reads the telemetry and sends commands
+(pause, manual torques, enabling disturbances/controller).
 """
 import numpy as np
 from PySide6.QtCore import QElapsedTimer, QSize, Qt, QTimer
@@ -19,8 +19,8 @@ from .dashboard import ModelPanel, TelemetryPanel, TelemetryPlots, format_model_
 from .view3d import AttitudeView
 
 FRAME_MS = 33                 # ~30 fps
-MAX_STEPS_PER_FRAME = 400     # evita il blocco della GUI a velocità elevate
-MANUAL_TORQUE_MAX_MNM = 5.0   # fondo scala degli slider [mN·m]
+MAX_STEPS_PER_FRAME = 400     # keeps the GUI responsive at high speeds
+MANUAL_TORQUE_MAX_MNM = 5.0   # full scale of the sliders [mN·m]
 
 
 class MainWindow(QMainWindow):
@@ -33,7 +33,7 @@ class MainWindow(QMainWindow):
         self._acc = 0.0
         self._frame = 0
 
-        self.setWindowTitle("satSim — ADCS CubeSat 3U · Ruote di reazione")
+        self.setWindowTitle("satSim — 3U CubeSat ADCS · Reaction wheels")
         self.resize(1720, 980)
 
         rw = self.engine.rw
@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
 
         right = QSplitter(Qt.Vertical)
         right.addWidget(panel_scroll)
-        model_box = QGroupBox("Modello matematico attivo")
+        model_box = QGroupBox("Active mathematical model")
         QVBoxLayout(model_box).addWidget(self.model)
         right.addWidget(model_box)
         right.setSizes([560, 420])
@@ -75,9 +75,9 @@ class MainWindow(QMainWindow):
         self.timer.start(FRAME_MS)
         self._refresh(force_model=True)
 
-    # ----------------------------------------------------------- controlli
+    # ------------------------------------------------------------ controls
     def _build_controls(self) -> QWidget:
-        box = QGroupBox("Comandi")
+        box = QGroupBox("Controls")
         g = QGridLayout(box)
 
         def button(text, icon_name, slot, variant=None, icon_color=theme.TEXT):
@@ -90,18 +90,18 @@ class MainWindow(QMainWindow):
             b.clicked.connect(slot)
             return b
 
-        self.btn_pause = button("Pausa  [Spazio]", "mdi6.pause", self.toggle_pause, "accent", "white")
-        btn_reset = button("Reset (tumbling casuale)", "mdi6.restore", self._reset)
-        btn_kick = button("Perturba assetto 45°", "mdi6.rotate-3d-variant",
+        self.btn_pause = button("Pause  [Space]", "mdi6.pause", self.toggle_pause, "accent", "white")
+        btn_reset = button("Reset (random tumbling)", "mdi6.restore", self._reset)
+        btn_kick = button("Perturb attitude 45°", "mdi6.rotate-3d-variant",
                           lambda: self.sim.kick_attitude(45.0))
-        btn_imp = button("Impulso 5 mN·m × 1 s", "mdi6.flash", self._impulse, "warning", theme.WARNING)
+        btn_imp = button("Impulse 5 mN·m × 1 s", "mdi6.flash", self._impulse, "warning", theme.WARNING)
         g.addWidget(self.btn_pause, 0, 0)
         g.addWidget(btn_reset, 0, 1)
         g.addWidget(btn_kick, 1, 0)
         g.addWidget(btn_imp, 1, 1)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("Velocità simulazione:"))
+        row.addWidget(QLabel("Simulation speed:"))
         self.cmb_speed = QComboBox()
         speeds = [0.25, 0.5, 1, 2, 5, 10, 20]
         for s in speeds:
@@ -115,12 +115,12 @@ class MainWindow(QMainWindow):
 
         d = self.engine.params.disturbances
         checks = [
-            ("Controllore PD", self.sim.controller_enabled,
+            ("PD controller", self.sim.controller_enabled,
              lambda v: setattr(self.sim, "controller_enabled", v)),
-            ("Gradiente di gravità", d.enable_gravity_gradient,
+            ("Gravity gradient", d.enable_gravity_gradient,
              lambda v: setattr(d, "enable_gravity_gradient", v)),
-            ("Pressione solare", d.enable_srp, lambda v: setattr(d, "enable_srp", v)),
-            ("Dipolo magnetico", d.enable_magnetic, lambda v: setattr(d, "enable_magnetic", v)),
+            ("Solar pressure", d.enable_srp, lambda v: setattr(d, "enable_srp", v)),
+            ("Magnetic dipole", d.enable_magnetic, lambda v: setattr(d, "enable_magnetic", v)),
         ]
         crow = QHBoxLayout()
         for label, state, cb in checks:
@@ -130,7 +130,7 @@ class MainWindow(QMainWindow):
             crow.addWidget(c)
         g.addLayout(crow, 3, 0, 1, 2)
 
-        tbox = QGroupBox(f"Coppia di disturbo manuale (body) ±{MANUAL_TORQUE_MAX_MNM:g} mN·m")
+        tbox = QGroupBox(f"Manual disturbance torque (body) ±{MANUAL_TORQUE_MAX_MNM:g} mN·m")
         tg = QGridLayout(tbox)
         self.sliders, self.slider_labels = [], []
         for i, ax in enumerate("xyz"):
@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
             tg.addWidget(lab, i, 2)
             self.sliders.append(s)
             self.slider_labels.append(lab)
-        btn_zero = QPushButton("Azzera coppie manuali")
+        btn_zero = QPushButton("Reset manual torques")
         btn_zero.setIcon(theme.icon("mdi6.restore"))
         btn_zero.clicked.connect(lambda: [s.setValue(0) for s in self.sliders])
         tg.addWidget(btn_zero, 3, 0, 1, 3)
@@ -170,7 +170,7 @@ class MainWindow(QMainWindow):
 
     def toggle_pause(self):
         self.paused = not self.paused
-        self.btn_pause.setText("Riprendi  [Spazio]" if self.paused else "Pausa  [Spazio]")
+        self.btn_pause.setText("Resume  [Space]" if self.paused else "Pause  [Space]")
         self.btn_pause.setIcon(theme.icon("mdi6.play" if self.paused else "mdi6.pause", "white"))
 
     # ------------------------------------------------------------- loop
@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
         if not self.paused:
             self._acc += elapsed * self.speed
             n = int(self._acc / self.engine.dt)
-            if n > MAX_STEPS_PER_FRAME:          # la CPU non tiene il passo: rallenta
+            if n > MAX_STEPS_PER_FRAME:          # the CPU cannot keep up: slow down
                 n, self._acc = MAX_STEPS_PER_FRAME, 0.0
             else:
                 self._acc -= n * self.engine.dt
@@ -189,9 +189,9 @@ class MainWindow(QMainWindow):
         self._refresh(force_model=False)
         rtf = n * self.engine.dt / elapsed if elapsed > 0 else 0
         self.statusBar().showMessage(
-            f"t_sim = {self.sim.last.t:8.2f} s   |   fattore tempo reale ≈ {rtf:5.2f}×   |   "
-            f"{'IN PAUSA' if self.paused else 'IN ESECUZIONE'}   |   "
-            f"orbita {self.engine.params.orbit.altitude / 1e3:.0f} km, "
+            f"t_sim = {self.sim.last.t:8.2f} s   |   real-time factor ≈ {rtf:5.2f}×   |   "
+            f"{'PAUSED' if self.paused else 'RUNNING'}   |   "
+            f"orbit {self.engine.params.orbit.altitude / 1e3:.0f} km, "
             f"T = {self.engine.env.period / 60:.1f} min")
 
     def _refresh(self, force_model: bool):
@@ -205,5 +205,5 @@ class MainWindow(QMainWindow):
 
 
 def apply_dark_palette(app):
-    """Compatibilità: il tema è ora definito in gui/theme.py."""
+    """Compatibility: the theme is now defined in gui/theme.py."""
     theme.apply_theme(app)

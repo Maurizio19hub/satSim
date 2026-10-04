@@ -1,10 +1,10 @@
 """
-Finestra di confronto PPO vs PD (python main.py --compare).
+PPO vs PD comparison window (python main.py --compare).
 
-Due satelliti partono dalla stessa condizione iniziale (stesso seed) e
-avanzano insieme: a sinistra l'agente PPO addestrato, a destra il PD. I
-grafici sovrappongono le curve dei due controllori. La logica sta in
-rl/compare.py; questa finestra visualizza soltanto.
+Two satellites start from the same initial condition (same seed) and
+advance together: the trained PPO agent on the left, the PD on the right. The
+plots overlay the curves of the two controllers. The logic lives in
+rl/compare.py; this window only displays it.
 """
 import numpy as np
 import pyqtgraph as pg
@@ -39,14 +39,14 @@ def _dash(color=theme.DANGER):
 
 # =============================================================================
 class ComparePlots(pg.GraphicsLayoutWidget):
-    """Grafici con le curve di PPO e PD sovrapposte."""
+    """Plots with the PPO and PD curves overlaid."""
 
-    SPECS = [  # (chiave storico, titolo, unità, scala log)
-        ("err", "Errore d'assetto", "deg (log)", True),
-        ("w", "Velocità angolare |ω|", "deg/s", False),
-        ("alpha", "Accelerazione angolare  max |α_i|", "deg/s²", False),
-        ("rpm", "Velocità ruote  max |Ω|", "RPM", False),
-        ("power", "Potenza elettrica ruote", "W", False),
+    SPECS = [  # (history key, title, units, log scale)
+        ("err", "Attitude error", "deg (log)", True),
+        ("w", "Angular velocity |ω|", "deg/s", False),
+        ("alpha", "Angular acceleration  max |α_i|", "deg/s²", False),
+        ("rpm", "Wheel speed  max |Ω|", "RPM", False),
+        ("power", "Wheel electrical power", "W", False),
     ]
 
     def __init__(self, alpha_max_deg: float, max_rpm: float, parent=None):
@@ -61,7 +61,7 @@ class ComparePlots(pg.GraphicsLayoutWidget):
             theme.style_plot(p, title, units)
             if log:
                 p.setLogMode(y=True)
-                for th in (1.0, 0.01):          # 1°, soglia del criterio di successo
+                for th in (1.0, 0.01):          # 1°, success-criterion threshold
                     p.addItem(pg.InfiniteLine(pos=np.log10(th), angle=0, pen=_dash(theme.MUTED)))
             if key == "alpha":
                 p.addItem(pg.InfiniteLine(pos=alpha_max_deg, angle=0, pen=_dash()))
@@ -72,7 +72,7 @@ class ComparePlots(pg.GraphicsLayoutWidget):
             else:
                 p.setXLink(first)
             self.curves[key] = {name: p.plot(pen=pg.mkPen(c, width=2)) for name, c in COLORS.items()}
-        p.setLabel("bottom", "tempo simulato [s]", color=theme.MUTED)
+        p.setLabel("bottom", "simulated time [s]", color=theme.MUTED)
 
     def update_curves(self, runs):
         for r in runs:
@@ -85,7 +85,7 @@ class ComparePlots(pg.GraphicsLayoutWidget):
 
 # =============================================================================
 class MetricCard(QFrame):
-    """Una grandezza con i valori di PPO e PD affiancati; il migliore evidenziato."""
+    """One quantity with the PPO and PD values side by side; the better one highlighted."""
 
     def __init__(self, title: str, unit: str, better: str = "low", fmt: str = ".2f"):
         super().__init__()
@@ -139,7 +139,7 @@ class CompareWindow(QMainWindow):
         self.rng = np.random.default_rng()
         self.episode_s = self.cmp.runs[0].env.max_episode_steps * self.cmp.dt
 
-        self.setWindowTitle("satSim — Confronto PPO vs PD")
+        self.setWindowTitle("satSim — PPO vs PD comparison")
         self.resize(1760, 1020)
 
         root = QWidget()
@@ -164,7 +164,7 @@ class CompareWindow(QMainWindow):
             dot.setStyleSheet(f"color: {COLORS[r.name]}; font-size: 12pt;")
             name = QLabel(r.name)
             name.setStyleSheet("font-weight: 700; font-size: 11pt;")
-            sub = QLabel(f"agente  {model_path}" if r.name == "PPO" else "controllore PD sui quaternioni")
+            sub = QLabel(f"agent  {model_path}" if r.name == "PPO" else "quaternion PD controller")
             sub.setObjectName("muted")
             for w in (dot, name, sub):
                 head.addWidget(w)
@@ -180,14 +180,14 @@ class CompareWindow(QMainWindow):
         mg.setContentsMargins(0, 0, 0, 0)
         mg.setSpacing(10)
         self.cards = {
-            "err": MetricCard("Errore d'assetto", "°", "low", ".4f"),
-            "w": MetricCard("Velocità angolare |ω|", "°/s", "low", ".4f"),
-            "alpha": MetricCard("|α| massima", "°/s²", "low", ".2f"),
-            "rpm": MetricCard("Max velocità ruote", "RPM", "low", ".0f"),
-            "energy": MetricCard("Energia", "J", "low", ".1f"),
-            "ret": MetricCard("Reward accumulata", "", "high", ".1f"),
-            "t1": MetricCard("Tempo per < 1°", "s", "low", ".2f"),
-            "t001": MetricCard("Tempo per < 0.01°", "s", "low", ".2f"),
+            "err": MetricCard("Attitude error", "°", "low", ".4f"),
+            "w": MetricCard("Angular velocity |ω|", "°/s", "low", ".4f"),
+            "alpha": MetricCard("Max |α|", "°/s²", "low", ".2f"),
+            "rpm": MetricCard("Max wheel speed", "RPM", "low", ".0f"),
+            "energy": MetricCard("Energy", "J", "low", ".1f"),
+            "ret": MetricCard("Cumulative reward", "", "high", ".1f"),
+            "t1": MetricCard("Time to < 1°", "s", "low", ".2f"),
+            "t001": MetricCard("Time to < 0.01°", "s", "low", ".2f"),
         }
         for i, c in enumerate(self.cards.values()):
             mg.addWidget(c, i // 4, i % 4)
@@ -220,7 +220,7 @@ class CompareWindow(QMainWindow):
         self.timer.start(FRAME_MS)
         self._refresh()
 
-    # --------------------------------------------------------- intestazione
+    # --------------------------------------------------------------- header
     def _build_header(self) -> QWidget:
         w = QWidget()
         h = QHBoxLayout(w)
@@ -228,7 +228,7 @@ class CompareWindow(QMainWindow):
         h.setSpacing(12)
         ic = QLabel()
         ic.setPixmap(theme.icon("mdi6.satellite-variant", theme.ACCENT).pixmap(26, 26))
-        title = QLabel("Confronto PPO vs PD")
+        title = QLabel("PPO vs PD comparison")
         title.setObjectName("h1")
         self.lbl_info = QLabel()
         self.lbl_info.setObjectName("muted")
@@ -247,7 +247,7 @@ class CompareWindow(QMainWindow):
             h.addWidget(x)
         return w
 
-    # ----------------------------------------------------- barra comandi
+    # -------------------------------------------------------------- toolbar
     def _build_toolbar(self) -> QWidget:
         bar = card()
         h = QHBoxLayout(bar)
@@ -280,17 +280,17 @@ class CompareWindow(QMainWindow):
         self.spin_seed.setButtonSymbols(QSpinBox.NoButtons)
         h.addWidget(lab)
         h.addWidget(self.spin_seed)
-        h.addWidget(button("Avvia", "mdi6.play", lambda: self._start(self.spin_seed.value()),
+        h.addWidget(button("Start", "mdi6.play", lambda: self._start(self.spin_seed.value()),
                            "accent", "white"))
-        h.addWidget(button("Casuale", "mdi6.dice-5", self._random_seed))
+        h.addWidget(button("Random", "mdi6.dice-5", self._random_seed))
         h.addWidget(sep())
 
-        self.btn_pause = button("Pausa", "mdi6.pause", self.toggle_pause)
-        self.btn_pause.setToolTip("Pausa / riprendi  [Spazio]")
+        self.btn_pause = button("Pause", "mdi6.pause", self.toggle_pause)
+        self.btn_pause.setToolTip("Pause / resume  [Space]")
         h.addWidget(self.btn_pause)
         h.addWidget(sep())
 
-        sp = QLabel("Velocità")
+        sp = QLabel("Speed")
         sp.setObjectName("muted")
         h.addWidget(sp)
         seg = QHBoxLayout()
@@ -311,9 +311,9 @@ class CompareWindow(QMainWindow):
         h.addLayout(seg)
         h.addWidget(sep())
 
-        imp = button(f"Impulso {IMPULSE_TORQUE * 1e3:g} mN·m × {IMPULSE_DURATION:g} s",
+        imp = button(f"Impulse {IMPULSE_TORQUE * 1e3:g} mN·m × {IMPULSE_DURATION:g} s",
                      "mdi6.flash", lambda: self.cmp.apply_impulse(self.rng), "warning", theme.WARNING)
-        imp.setToolTip("Stessa coppia esterna, direzione casuale, su entrambi i satelliti")
+        imp.setToolTip("Same external torque, random direction, on both satellites")
         h.addWidget(imp)
         h.addStretch()
 
@@ -323,7 +323,7 @@ class CompareWindow(QMainWindow):
         h.addWidget(legend)
         return bar
 
-    # --------------------------------------------------------- azioni
+    # -------------------------------------------------------------- actions
     def _start(self, seed: int):
         self.cmp.reset(seed)
         self.spin_seed.setValue(seed)
@@ -337,7 +337,7 @@ class CompareWindow(QMainWindow):
 
     def toggle_pause(self):
         self.paused = not self.paused
-        self.btn_pause.setText("Riprendi" if self.paused else "Pausa")
+        self.btn_pause.setText("Resume" if self.paused else "Pause")
         self.btn_pause.setIcon(theme.icon("mdi6.play" if self.paused else "mdi6.pause"))
 
     # ------------------------------------------------------------- loop
@@ -346,7 +346,7 @@ class CompareWindow(QMainWindow):
         if not self.paused and not self.cmp.done:
             self._acc += elapsed * self.speed
             n = int(self._acc / self.cmp.dt)
-            if n > MAX_STEPS_PER_FRAME:          # la CPU non tiene il passo: rallenta
+            if n > MAX_STEPS_PER_FRAME:          # the CPU cannot keep up: slow down
                 n, self._acc = MAX_STEPS_PER_FRAME, 0.0
             else:
                 self._acc -= n * self.cmp.dt
@@ -375,11 +375,11 @@ class CompareWindow(QMainWindow):
         self.progress.setValue(int(1000 * c.t / self.episode_s))
         if c.done:
             winner = "PPO" if ppo.ret > pd.ret else "PD"
-            state, text = "done", f"CONCLUSO · reward migliore: {winner}"
+            state, text = "done", f"FINISHED · best reward: {winner}"
         elif self.paused:
-            state, text = "pause", "IN PAUSA"
+            state, text = "pause", "PAUSED"
         else:
-            state, text = "run", "IN ESECUZIONE"
+            state, text = "run", "RUNNING"
         if self.chip.property("state") != state:
             self.chip.setProperty("state", state)
             self.chip.style().unpolish(self.chip)

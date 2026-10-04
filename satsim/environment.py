@@ -1,12 +1,12 @@
 """
-Modello d'ambiente orbitale e coppie di disturbo.
+Orbital environment model and disturbance torques.
 
-Fornisce, in funzione del tempo t e dell'assetto q, le tre coppie di disturbo
-espresse nel riferimento body:
+Provides, as a function of time t and attitude q, the three disturbance torques
+expressed in the body frame:
 
-    T_gg  : gradiente di gravità
-    T_srp : pressione di radiazione solare (modello a 6 facce + ombra cilindrica)
-    T_mag : coppia magnetica residua (campo terrestre a dipolo)
+    T_gg  : gravity gradient
+    T_srp : solar radiation pressure (6-face model + cylindrical shadow)
+    T_mag : residual magnetic torque (dipole Earth field)
 """
 import numpy as np
 
@@ -27,7 +27,7 @@ class OrbitalEnvironment:
 
         inc = np.radians(orbit.inclination_deg)
         raan = np.radians(orbit.raan_deg)
-        # Matrice di rotazione dal piano orbitale al riferimento inerziale (ECI):
+        # Rotation matrix from the orbital plane to the inertial frame (ECI):
         # R3(-RAAN) · R1(-i)
         c, s = np.cos(raan), np.sin(raan)
         R3 = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
@@ -42,21 +42,21 @@ class OrbitalEnvironment:
 
         self._build_faces(sc)
 
-    # ------------------------------------------------------------------ orbita
+    # ------------------------------------------------------------------- orbit
     def position(self, t: float) -> np.ndarray:
-        """Posizione del satellite in ECI [m] su orbita circolare."""
+        """Satellite position in ECI [m] on a circular orbit."""
         u = self._u0 + self.mean_motion * t
         return self._orbit_to_eci @ (self.radius * np.array([np.cos(u), np.sin(u), 0.0]))
 
     def in_eclipse(self, r: np.ndarray) -> bool:
-        """Modello d'ombra cilindrico: la Terra proietta un cilindro di raggio R_E."""
+        """Cylindrical shadow model: the Earth casts a cylinder of radius R_E."""
         proj = r @ self.sun_inertial
         if proj >= 0:
             return False
         return np.linalg.norm(r - proj * self.sun_inertial) < R_EARTH
 
     def magnetic_field_inertial(self, r: np.ndarray) -> np.ndarray:
-        """Campo terrestre a dipolo: B = B0 (R_E/r)³ [3(m̂·r̂)r̂ − m̂]  [T]."""
+        """Dipole Earth field: B = B0 (R_E/r)³ [3(m̂·r̂)r̂ − m̂]  [T]."""
         rn = np.linalg.norm(r)
         r_hat = r / rn
         m_hat = DIPOLE_AXIS_INERTIAL
@@ -73,15 +73,15 @@ class OrbitalEnvironment:
                 n[axis] = sign
                 normals.append(n)
                 areas.append(area)
-                centers.append(n * half - cm)   # braccio rispetto al centro di massa
+                centers.append(n * half - cm)   # lever arm about the centre of mass
         self.face_normals = np.array(normals)
         self.face_areas = np.array(areas)
         self.face_arms = np.array(centers)
 
     def srp_torque(self, sun_body: np.ndarray) -> np.ndarray:
-        """Somma dei contributi delle facce illuminate.
+        """Sum of the contributions of the lit faces.
 
-        Per ogni faccia con cosθ = n̂·ŝ > 0:
+        For each face with cosθ = n̂·ŝ > 0:
             F = −P·A·cosθ·[(1−ρs)·ŝ + 2(ρs·cosθ + ρd/3)·n̂]
             T = r_cp × F
         """
@@ -96,11 +96,11 @@ class OrbitalEnvironment:
         F = -SOLAR_PRESSURE * A * ct * ((1 - rs) * sun_body + 2 * (rs * ct + rd / 3) * n)
         return cross3(self.face_arms[lit], F).sum(axis=0)
 
-    # ------------------------------------------------------------ disturbi
+    # ---------------------------------------------------------- disturbances
     def disturbance_torques(self, t: float, R_bi: np.ndarray, J: np.ndarray) -> dict:
-        """Calcola T_gg, T_srp, T_mag nel riferimento body.
+        """Computes T_gg, T_srp, T_mag in the body frame.
 
-        R_bi: matrice di rotazione body → inerziale, R(q).
+        R_bi: rotation matrix body → inertial, R(q).
         """
         r_I = self.position(t)
         R_ib = R_bi.T

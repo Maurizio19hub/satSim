@@ -1,18 +1,18 @@
 """
-Controllore PD sui quaternioni (placeholder in attesa dell'agente RL).
+Quaternion PD controller (placeholder until the RL agent replaces it).
 
-Legge di controllo (coppia desiderata sul corpo, riferimento body):
+Control law (desired body torque, body frame):
 
-    q_e   = q_target* ⊗ q                    (con q_e0 ≥ 0: rotazione più breve)
+    q_e   = q_target* ⊗ q                    (with q_e0 ≥ 0: shortest rotation)
     T_cmd = −J·(Kp·q_e,vec + Kd·ω) + ω × (J·ω + h_rw)
 
-Il primo termine è un PD "normalizzato per l'inerzia": per piccoli angoli
-q_e,vec ≈ θ/2, quindi ogni asse si comporta come un oscillatore del secondo
-ordine θ̈ + Kd·θ̇ + (Kp/2)·θ = 0, con
+The first term is an "inertia-normalised" PD: for small angles
+q_e,vec ≈ θ/2, so each axis behaves like a second-order oscillator
+θ̈ + Kd·θ̇ + (Kp/2)·θ = 0, with
 
     Kp = 2·ωn²,   Kd = 2·ζ·ωn
 
-Il secondo termine (opzionale) compensa l'accoppiamento giroscopico.
+The second (optional) term compensates the gyroscopic coupling.
 """
 import numpy as np
 

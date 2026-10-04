@@ -1,9 +1,9 @@
 """
-Anello chiuso engine + controllore + disturbi manuali, con storico della telemetria.
+Closed loop engine + controller + manual disturbances, with telemetry history.
 
-Non dipende dalla GUI: può essere usato anche da script headless o notebook.
-In futuro l'ambiente Gymnasium sostituirà il controllore PD con l'azione
-dell'agente RL chiamando direttamente SatelliteEngine.step().
+It does not depend on the GUI: it can also be used from headless scripts or notebooks.
+The Gymnasium environment (rl/adcs_env.py) replaces the PD controller with the
+RL agent's action by calling SatelliteEngine.step() directly.
 """
 from collections import deque
 
@@ -16,7 +16,7 @@ from .quaternion import quat_from_axis_angle, quat_mult, quat_normalize
 
 
 class TelemetryHistory:
-    """Buffer circolare delle grandezze da plottare (finestra temporale fissa)."""
+    """Circular buffer of the quantities to plot (fixed time window)."""
     FIELDS = ("t", "q", "att_err", "omega", "rpm", "power", "energy")
 
     def __init__(self, window_s: float, dt: float):
@@ -47,17 +47,17 @@ class ClosedLoopSimulation:
         self.engine = SatelliteEngine(params)
         self.controller = QuaternionPDController(self.engine.J)
         self.controller_enabled = True
-        self.T_manual = np.zeros(3)          # coppia manuale continua (slider)
-        self._impulse = np.zeros(3)          # coppia impulsiva temporanea
+        self.T_manual = np.zeros(3)          # continuous manual torque (slider)
+        self._impulse = np.zeros(3)          # temporary impulsive torque
         self._impulse_left = 0.0
         self.rng = np.random.default_rng(seed)
         self.history = TelemetryHistory(history_window_s, self.engine.dt)
         self.last: Telemetry | None = None
         self.reset()
 
-    # ----------------------------------------------------------- comandi
+    # ---------------------------------------------------------- commands
     def reset(self, tumble: bool = True):
-        """Condizione iniziale: assetto casuale a ~60° dal target + rotazione residua (post-rilascio)."""
+        """Initial condition: random attitude 40–80° from the target + residual rotation (after deployment)."""
         if tumble:
             axis = self.rng.normal(size=3)
             q0 = quat_from_axis_angle(axis, np.radians(self.rng.uniform(40, 80)))
@@ -70,7 +70,7 @@ class ClosedLoopSimulation:
         self.history.append(self.last)
 
     def kick_attitude(self, angle_deg: float = 45.0):
-        """Ruota istantaneamente l'assetto di un angolo casuale (test di stabilizzazione)."""
+        """Instantly rotates the attitude by the given angle about a random axis (stabilisation test)."""
         dq = quat_from_axis_angle(self.rng.normal(size=3), np.radians(angle_deg))
         self.engine.set_attitude(quat_normalize(quat_mult(self.engine.q, dq)))
 
@@ -78,7 +78,7 @@ class ClosedLoopSimulation:
         self._impulse = np.asarray(torque_body, float)
         self._impulse_left = duration_s
 
-    # ---------------------------------------------------------- avanzamento
+    # ------------------------------------------------------------ stepping
     def step(self) -> Telemetry:
         e = self.engine
         if self.controller_enabled:

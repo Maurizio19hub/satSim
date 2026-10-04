@@ -1,7 +1,7 @@
 """
-Test di verifica dell'engine fisico (leggi di conservazione e soluzioni analitiche).
+Verification tests of the physics engine (conservation laws and analytical solutions).
 
-Esecuzione:  python -m pytest -q
+Run with:  python -m pytest -q
 """
 import numpy as np
 import pytest
@@ -33,11 +33,11 @@ def test_inertia_matrix_3U():
 
 
 def test_torque_free_conservation():
-    """Senza coppie esterne e ruote ferme: ‖H‖ inerziale ed energia cinetica costanti."""
+    """No external torques and wheels at rest: inertial ‖H‖ and kinetic energy are constant."""
     e = make_engine()
     e.reset(omega0=[0.3, -0.2, 0.5])
     H0, K0 = e._telemetry(np.zeros(4), np.zeros(4), np.zeros(3)).H_inertial, kinetic_energy(e)
-    for _ in range(2000):                         # 100 s di tumbling
+    for _ in range(2000):                         # 100 s of tumbling
         tel = e.step(np.zeros(4))
     assert np.allclose(tel.H_inertial, H0, rtol=0, atol=1e-9)
     assert abs(kinetic_energy(e) - K0) / K0 < 1e-7
@@ -45,7 +45,7 @@ def test_torque_free_conservation():
 
 
 def test_internal_torques_conserve_total_momentum():
-    """Le ruote scambiano momento col corpo: H totale inerziale deve restare costante."""
+    """The wheels exchange momentum with the body: the total inertial H must stay constant."""
     e = make_engine()
     e.reset(omega0=[0.05, 0.02, -0.04])
     rng = np.random.default_rng(0)
@@ -58,11 +58,11 @@ def test_internal_torques_conserve_total_momentum():
 def test_wheel_saturation_is_exact_and_conservative():
     e = make_engine(config="orthogonal3")
     H0 = e.step(np.zeros(3)).H_inertial
-    for _ in range(4000):                         # coppia massima per 200 s → saturazione
+    for _ in range(4000):                         # maximum torque for 200 s → saturation
         tel = e.step(np.full(3, 1.0))
     assert np.all(tel.wheel_rpm <= 6000 + 1e-9)
     assert np.allclose(tel.wheel_rpm, 6000)
-    assert np.allclose(tel.wheel_torque, 0)       # a saturazione la ruota non accetta coppia
+    assert np.allclose(tel.wheel_torque, 0)       # at saturation the wheel accepts no torque
     assert np.allclose(tel.H_inertial, H0, rtol=0, atol=1e-9)
 
 
@@ -76,7 +76,7 @@ def test_power_and_energy_idle():
 
 
 def test_quaternion_kinematics_analytic():
-    """Rotazione uniforme attorno a un asse principale: q(t) = [cos(ωt/2), 0, 0, sin(ωt/2)]."""
+    """Uniform rotation about a principal axis: q(t) = [cos(ωt/2), 0, 0, sin(ωt/2)]."""
     e = make_engine(products=(0, 0, 0))
     w = 0.7
     e.reset(omega0=[0, 0, w])
@@ -89,7 +89,7 @@ def test_quaternion_kinematics_analytic():
 def test_gravity_gradient_zero_on_principal_axis():
     e = make_engine(disturbances=True, products=(0, 0, 0))
     r = e.env.position(0.0)
-    # Allinea z_B alla direzione radiale: T_gg deve annullarsi
+    # Align z_B with the radial direction: T_gg must vanish
     z = np.array([0, 0, 1.0])
     rh = r / np.linalg.norm(r)
     axis = np.cross(z, rh)
@@ -110,16 +110,16 @@ def test_pd_controller_converges():
 
 
 def test_torque_rate_limit():
-    """La coppia applicata non può variare più di max_torque_rate·dt per passo."""
+    """The applied torque cannot change by more than max_torque_rate·dt per step."""
     e = make_engine()
     d_max = e.params.wheels.max_torque_rate * e.dt
     tau_max = e.params.wheels.max_torque
     prev = np.zeros(4)
     for k in range(30):
-        cmd = np.full(4, tau_max if k < 15 else -tau_max)    # gradino +T_max, poi −T_max
+        cmd = np.full(4, tau_max if k < 15 else -tau_max)    # step to +T_max, then −T_max
         tel = e.step(cmd)
         assert np.all(np.abs(tel.wheel_torque - prev) <= d_max + 1e-15)
         prev = tel.wheel_torque
-    np.testing.assert_allclose(tel.wheel_torque, -tau_max)   # dopo 15 passi arriva a −T_max
+    np.testing.assert_allclose(tel.wheel_torque, -tau_max)   # after 15 steps it reaches −T_max
     e.reset()
-    np.testing.assert_array_equal(e.tau_cmd, 0.0)             # il reset azzera la coppia
+    np.testing.assert_array_equal(e.tau_cmd, 0.0)             # reset zeroes the torque
