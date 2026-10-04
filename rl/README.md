@@ -1,6 +1,6 @@
 # satSim — Reinforcement Learning (PPO)
 
-Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nel [README principale](../README.md).
+Questo documento tiene traccia **solo della logica di Reinforcement Learning** del progetto: formulazione del problema, spazi, reward, algoritmo e scelte di addestramento. La fisica del simulatore è descritta nella [documentazione tecnica](../DOCUMENTAZIONE_TECNICA.md).
 
 **Stato:** v11 dell'ambiente.
 - **Azione:** variazione di coppia delle ruote.

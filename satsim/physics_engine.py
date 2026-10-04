@@ -10,7 +10,7 @@ Vettore di stato (dimensione 7 + N + 1):
     Ω  : velocità di rotazione assiale delle N ruote [rad/s]
     E  : energia elettrica consumata dalle ruote [J]
 
-Equazioni implementate (vedi README.md per la derivazione):
+Equazioni implementate (vedi DOCUMENTAZIONE_TECNICA.md per la derivazione):
 
     [1] J  (tensore d'inerzia 3x3 del CubeSat 3U)
     [2] dΩ/dt = T_rw / I_rw                     (+ saturazione a ±Ω_max,
