@@ -34,6 +34,11 @@ class ReactionWheelParams:
     # 8e-3 N·m/s → from 0 to T_max in 0.25 s. Avoids abrupt torque jumps
     # (vibrations, current peaks, wear). float("inf") = no limit.
     max_torque_rate: float = 8.0e-3     # [N·m/s]
+    # Maximum body angular acceleration per axis allowed by the ADCS (safety
+    # filter on the wheel torques, applied to any controller). 10 °/s² is about
+    # the PD peak and the physical maximum on the x/y axes; in practice it only
+    # cuts the z axis, whose inertia is 5 times smaller. float("inf") = no limit.
+    max_body_accel_deg: float = 10.0    # [°/s²]
     # Power model: P = k1*|T| + k2*|T*Omega| + P_static  (per wheel)
     k1: float = 50.0                    # [W/(N·m)]  resistive losses ~ current ∝ torque
     k2: float = 1.2                     # [-]        inverse of the mechanical efficiency

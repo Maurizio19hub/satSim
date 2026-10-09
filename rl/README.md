@@ -632,3 +632,32 @@ About half of the time is physics: ~1.2 ms per step, with 5 evaluations of the d
 
 ### 2026-10-04 — English translation
 - The whole repository (code, comments, GUI and CLI strings, documentation) translated into English. In `rl.evaluate` the baselines are now called `free` and `random` (were `libero` and `casuale`). The technical documentation is now `TECHNICAL_DOCUMENTATION.md`.
+
+### 2026-10-09 — Body acceleration limit in the engine
+- **Research: is there a safety limit on angular acceleration?** No universal value exists. Real limits depend on the mission:
+  - structural: negligible for a rigid 3U (at 10 °/s² the tip of the satellite has ~0.03 m/s²); relevant only with deployed flexible appendages (slew profiles that do not excite flexible modes, e.g. JWST);
+  - sensors: star trackers limit the angular **rate** (0.3–0.6 °/s for the ST200), not the acceleration;
+  - actuators: wheel torque and momentum, already modelled;
+  - jitter: set by the payload requirements.
+  - Operational reference: MinXSS-1 (3U, BCT XACT) used 1 °/s² and 6 °/s by default, with hardware capable of ~25 °/s². The limit is therefore a design requirement.
+- **Measurement on the v11 model (`local_training_v4_seed1@3_best`, test seeds):** the |α| peak (up to 38.9 °/s², mean 18.0) is a single kick in the first 0.2–0.4 s of every episode, when the agent drives the torque to the maximum; above ~10.6 °/s² it can only be the z axis (J_zz 5 times smaller). |α| p99: PPO 3.8, PD 3.1 °/s². The reward penalty (`k_accel = 0.01` above 2 °/s²) is too weak to prevent it (0.37 for the peak step).
+- **Energy breakdown (mean per episode):** static 60 J (0.15 W × 4 wheels × 100 s) for everyone; control-dependent part PPO 5.8 J (k1·|T| 1.3 + k2·|T·Ω| 4.5) vs PD 1.3 J. The reducible part is at most ~4.5 J out of 66.
+- **Change (constraint, not reward):** new parameter `ReactionWheelParams.max_body_accel_deg = 10.0` and safety filter `SatelliteEngine.accel_limit`, applied by the engine to any controller (PD and agent) after the rate limit.
+  - At the start of the step α is affine in the wheel torques; the excess on a violating axis is removed with the body-torque correction J·(α − clip(α)) allocated with A⁺. Axes within the limit and the null-space part are not touched (scaling the whole command would also have slowed down x/y).
+  - Alternating projections with the motor limits (rate limit, ±T_max, wheel speed saturation), which keep priority.
+  - `SatAttitudeEnv` now reads back the torque actually commanded after the engine limits (`self._tau = engine.tau_cmd`), so the observation shows the filtered torque.
+- **Results without retraining (test seeds 100–109):**
+
+  | | v11 without limit | v11 with limit (same weights) | PD |
+  |---|---|---|---|
+  | Reward | −28.2 | −29.0 | −43.2 |
+  | Final error | 0.0004° | 0.0004° | 0.0031° |
+  | t<1° | 10.4 s | 10.5 s | 12.2 s |
+  | Max \|α\| (mean over seeds) | 18.0 | **9.8** | 6.2 |
+  | Energy | 65.8 J | 65.9 J | 61.3 J |
+
+  - As expected the limit costs almost nothing: it cuts the z-axis kicks, while the manoeuvre time is set by the x/y axes. PD unchanged (its peaks are below 10 °/s²).
+  - Random actions still exceed 10 °/s² at times: the satellite tumbles at ~50 °/s and the gyroscopic term changes within the 0.05 s step (the limit is respected at the start of the step in 355 out of 362 cases), or a wheel hits saturation.
+- Tests: `test_body_acceleration_limit`, `test_body_acceleration_limit_keeps_momentum` (23 tests). `test_torque_rate_limit` and `test_action_is_rate_limited_torque_change` disable the acceleration limit, because equal torques on all wheels are a pure z torque.
+- Cost: ~0.74 vs 0.69 ms per step.
+- **To do:** retrain with the limit (the agent can learn that kicks are clipped) and compare with v11; then the energy step (penalty on the dynamic power).

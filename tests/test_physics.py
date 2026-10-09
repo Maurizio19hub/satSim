@@ -10,9 +10,11 @@ from satsim import QuaternionPDController, SatelliteEngine, SimParams
 from satsim.quaternion import quat_from_axis_angle, quat_to_dcm
 
 
-def make_engine(disturbances=False, products=None, config="pyramid4"):
+def make_engine(disturbances=False, products=None, config="pyramid4", accel_limit=True):
     p = SimParams()
     p.wheels.configuration = config
+    if not accel_limit:
+        p.wheels.max_body_accel_deg = float("inf")
     d = p.disturbances
     d.enable_gravity_gradient = d.enable_srp = d.enable_magnetic = disturbances
     if products is not None:
@@ -111,7 +113,7 @@ def test_pd_controller_converges():
 
 def test_torque_rate_limit():
     """The applied torque cannot change by more than max_torque_rate·dt per step."""
-    e = make_engine()
+    e = make_engine(accel_limit=False)       # equal torques = pure z torque, above the accel limit
     d_max = e.params.wheels.max_torque_rate * e.dt
     tau_max = e.params.wheels.max_torque
     prev = np.zeros(4)
@@ -123,3 +125,29 @@ def test_torque_rate_limit():
     np.testing.assert_allclose(tel.wheel_torque, -tau_max)   # after 15 steps it reaches −T_max
     e.reset()
     np.testing.assert_array_equal(e.tau_cmd, 0.0)             # reset zeroes the torque
+
+
+def test_body_acceleration_limit():
+    """With random torque commands the body acceleration never exceeds max_body_accel_deg."""
+    e = make_engine(disturbances=True)
+    a_max = e.params.wheels.max_body_accel_deg
+    rng = np.random.default_rng(1)
+    e.reset(omega0=[0.05, -0.03, 0.04])
+    w_prev, peak = e.omega, 0.0
+    for _ in range(2000):
+        tel = e.step(rng.uniform(-2e-3, 2e-3, 4))
+        peak = max(peak, np.degrees(np.abs((tel.omega - w_prev) / e.dt)).max())
+        w_prev = tel.omega
+    assert peak <= a_max * 1.01                  # 1 %: change of the gyroscopic term within a step
+    assert peak > 0.9 * a_max                    # the limit is actually reached (z axis)
+
+
+def test_body_acceleration_limit_keeps_momentum():
+    """The filter only changes the commanded torque: total momentum is still conserved."""
+    e = make_engine()
+    e.reset(omega0=[0.05, 0.02, -0.04])
+    rng = np.random.default_rng(0)
+    H0 = e.step(np.zeros(4)).H_inertial
+    for _ in range(2000):
+        tel = e.step(rng.uniform(-2e-3, 2e-3, 4))
+    assert np.allclose(tel.H_inertial, H0, rtol=0, atol=1e-9)

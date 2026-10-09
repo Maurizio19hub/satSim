@@ -137,6 +137,7 @@ class SatAttitudeEnv(gym.Env):
         dtau = np.clip(action, -1.0, 1.0) * self.dtau_max
         self._tau = np.clip(self._tau + dtau, -self.tau_max, self.tau_max)
         tel = self.engine.step(self._tau, self.T_external)
+        self._tau = self.engine.tau_cmd.copy()   # torque after the engine limits (rate, acceleration)
         self.last_tel = tel
         self._steps += 1
 

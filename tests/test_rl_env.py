@@ -28,7 +28,10 @@ def test_check_env():
 
 
 def test_action_is_rate_limited_torque_change():
-    env = SatAttitudeEnv()
+    from satsim import SimParams
+    params = SimParams()
+    params.wheels.max_body_accel_deg = float("inf")    # equal torques = pure z torque
+    env = SatAttitudeEnv(params)
     obs, _ = env.reset(seed=0)
     n = env.n_wheels
     assert obs.shape == (6 + 2 * n,)

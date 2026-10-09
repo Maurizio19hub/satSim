@@ -71,6 +71,7 @@ class ReactionWheelArray:
         self.omega_max = p.max_rpm * RPM_TO_RADS
         self.tau_max = p.max_torque
         self.tau_rate_max = p.max_torque_rate
+        self.accel_max = np.radians(p.max_body_accel_deg)       # [rad/s²]
 
     @staticmethod
     def _spin_axes(config: str, beta: float) -> np.ndarray:
@@ -209,6 +210,46 @@ class SatelliteEngine:
         """
         return -self.rw.A_pinv @ T_body_cmd
 
+    def accel_limit(self, tau_prev: np.ndarray, tau_new: np.ndarray,
+                    T_manual: np.ndarray) -> np.ndarray:
+        """Safety filter on the body angular acceleration.
+
+        At the start of the step the acceleration is an affine function of the
+        wheel torques (Euler equation, torque held over the step):
+
+            α(τ) = J⁻¹ · ( −A·τ + T_manual − ω × (J·ω + h_rw) )
+
+        If some axis exceeds ±α_max, only the excess is removed: the body torque
+        is corrected by J·(α − clip(α)), mapped onto the wheels with the
+        minimum-norm allocation A⁺. Axes within the limit and the null-space part
+        of the command are left unchanged. The correction alternates with the
+        motor limits (rate limit, ±T_max, wheel speed saturation: alternating
+        projections), which have priority: if the two sets do not intersect,
+        the motor limits win.
+        Environmental disturbances (~1e-7 N·m) are neglected.
+        """
+        a_max = self.rw.accel_max
+        if not np.isfinite(a_max):
+            return tau_new
+        w = self.x[4:7]
+        c = T_manual - cross3(w, self.J @ w + self.h_rw)
+        d_max = self.rw.tau_rate_max * self.dt
+        # Box of feasible torques: rate limit, ±T_max and wheel speed saturation
+        # (the same bounds as rate_limit and limit_torque, which then change nothing).
+        om, k = self.x[7:7 + self.rw.n], self.rw.I_rw / self.dt
+        lo = np.maximum.reduce([tau_prev - d_max, np.full_like(tau_prev, -self.rw.tau_max),
+                                (-self.rw.omega_max - om) * k])
+        hi = np.minimum.reduce([tau_prev + d_max, np.full_like(tau_prev, self.rw.tau_max),
+                                (self.rw.omega_max - om) * k])
+        tau = np.clip(tau_new, lo, hi)
+        for _ in range(20):          # alternating projections: acceleration box ↔ torque box
+            alpha = self.J_inv @ (c - self.rw.A @ tau)
+            excess = alpha - np.clip(alpha, -a_max, a_max)
+            if not np.any(np.abs(excess) > 1e-9 * a_max):
+                break
+            tau = np.clip(tau + self.rw.A_pinv @ (self.J @ excess), lo, hi)
+        return tau
+
     # --------------------------------------------------------- dynamics
     def _derivatives(self, t, x, tau_w, T_manual):
         """f(t, x, u) — right-hand side of the ODE system."""
@@ -247,14 +288,16 @@ class SatelliteEngine:
         tau_wheel_cmd : motor torques requested from the N wheels [N·m]
         T_manual      : additional external disturbance torque (body) [N·m]
 
-        The requested torque goes through three limits, in this order:
+        The requested torque goes through four limits, in this order:
         |T| ≤ T_max, change ≤ max_torque_rate·dt relative to the previous
-        step, wheel speed saturation.
+        step, body acceleration ≤ max_body_accel_deg per axis (accel_limit),
+        wheel speed saturation.
         """
         n = self.rw.n
         tau_cmd = np.zeros(n) if tau_wheel_cmd is None else np.asarray(tau_wheel_cmd, float)
         T_manual = np.zeros(3) if T_manual is None else np.asarray(T_manual, float)
-        self.tau_cmd = self.rw.rate_limit(self.tau_cmd, tau_cmd, self.dt)
+        tau_new = self.rw.rate_limit(self.tau_cmd, tau_cmd, self.dt)
+        self.tau_cmd = self.accel_limit(self.tau_cmd, tau_new, T_manual)
         tau = self.rw.limit_torque(self.tau_cmd, self.x[7:7 + n], self.dt)
 
         dt, t, x = self.dt, self.t, self.x

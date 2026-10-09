@@ -246,6 +246,7 @@ $A^{+}$ is the Moore-Penrose pseudo-inverse. With 4 wheels it gives the **minimu
 1. **Torque:** $|T_{rw,i}|\le T_{max}$ (2 mN·m).
 2. **Torque rate (rate limit):** $|T_{rw,i}(t+\Delta t)-T_{rw,i}(t)|\le \dot T_{max}\,\Delta t$, with $\dot T_{max}$ = `max_torque_rate` = 8 mN·m/s. Going from 0 to $T_{max}$ takes 0.25 s, from $-T_{max}$ to $+T_{max}$ 0.5 s. It models the motor driver, which cannot change the current (∝ torque) instantaneously: an abrupt torque jump would cause vibrations, current peaks and wear. The limit is applied by the engine (`ReactionWheelArray.rate_limit`) to any controller, PD or RL agent.
 3. **Speed:** $|\Omega_i|\le\Omega_{max}$ (6000 RPM ≈ 628 rad/s).
+4. **Body acceleration (safety filter):** $|\alpha_i|\le\alpha_{max}$ per axis, with $\alpha_{max}$ = `max_body_accel_deg` = 10 °/s². It is a limit on the wheel torques derived from the acceleration: at the start of the step $\boldsymbol\alpha = J^{-1}(-A\mathbf T_{rw} + \mathbf T_{manual} - \boldsymbol\omega\times(J\boldsymbol\omega+\mathbf h_{rw}))$ is affine in $\mathbf T_{rw}$, so the excess on an axis is removed with the body-torque correction $J(\boldsymbol\alpha-\mathrm{clip}(\boldsymbol\alpha))$, allocated with $A^+$ (`SatelliteEngine.accel_limit`). The other axes and the null-space component are unchanged; the motor limits 1–3 keep priority. Since $J_{zz}$ is 5 times smaller, with 10 °/s² it acts practically only on the z axis (x/y can reach at most ≈ 10.6 °/s²). There is no universal safety threshold on angular acceleration: the value is a design requirement (see `rl/README.md`, log of 2026-10-09). The guarantee holds at the start of each step; within the step the gyroscopic term changes, an error below 1 % at manoeuvre rates (a few °/s) but larger in fast tumbling (tens of °/s).
 
 The torque is constant during the step $\Delta t$ (see §10), so equation 2 is integrated **exactly**: $\Omega_i(t+\Delta t)=\Omega_i+T_{rw,i}\Delta t/I_{rw}$. Before integration the command is limited to
 
@@ -438,7 +439,7 @@ By LaSalle's invariance principle the system converges to $\boldsymbol\omega=0,\
 
 ## 12. Verification and validation
 
-`tests/test_physics.py` contains 9 tests (`python -m pytest -q`):
+`tests/test_physics.py` contains 11 tests (`python -m pytest -q`):
 
 | Test | Physical property checked |
 |---|---|
@@ -450,6 +451,8 @@ By LaSalle's invariance principle the system converges to $\boldsymbol\omega=0,\
 | `test_quaternion_kinematics_analytic` | Uniform rotation about a principal axis: matches the analytical solution $\mathbf q(t)=[\cos\tfrac{\omega t}{2},0,0,\sin\tfrac{\omega t}{2}]$. |
 | `test_gravity_gradient_zero_on_principal_axis` | $\mathbf T_{gg}=0$ when nadir is aligned with a principal axis. |
 | `test_pd_controller_converges` | From 90° and with disturbances: error < 0.1° after 80 s. |
+| `test_body_acceleration_limit` | Random torque commands with disturbances: \|α\| never exceeds `max_body_accel_deg` (+1 %), and the limit is reached. |
+| `test_body_acceleration_limit_keeps_momentum` | With the acceleration filter active the total momentum is still conserved. |
 | `test_torque_rate_limit` | With a step command (+T_max then −T_max) the applied torque changes by at most $\dot T_{max}\Delta t$ per step; reset zeroes the torque. |
 
 The conservation of $\mathbf H$ is the most important test. It checks at once the sign consistency between equation 2 (wheels), equation 3 (Euler) and the allocation. A sign error in the reaction $-A\mathbf T_{rw}$ would make H grow systematically.
@@ -467,6 +470,8 @@ They are all in `satsim/config.py` (editable dataclasses).
 | $I_{rw}$ | 1.5·10⁻⁵ kg·m² | CubeSat-class wheel |
 | $\Omega_{max}$ | 6000 RPM | $h_{max}\approx 9.4$ mN·m·s per wheel |
 | $T_{max}$ | 2 mN·m | |
+| Torque rate | 8 mN·m/s | motor driver |
+| $\alpha_{max}$ | 10 °/s² per axis | acceleration safety filter |
 | $k_1, k_2, P_s$ | 50 W/(N·m), 1.2, 0.15 W | power model |
 | Orbit | 500 km, i = 51.6° | circular |
 | Residual dipole | [5, −3, 10] mA·m² | |
