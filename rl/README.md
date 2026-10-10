@@ -89,3 +89,13 @@ The detailed log of every experiment follows.
 ---
 
 ## RL development log
+
+### 2026-09-26 — Skeleton
+- Created the `rl/` folder with `adcs_env.py`.
+- `SatAttitudeEnv(gym.Env)` with empty methods: `__init__`, `reset`, `step`, `_compute_reward`, `_get_obs`.
+- PPO configuration (`PPO_CONFIG`) and training (`TRAIN_CONFIG`, `train()`) with Stable-Baselines3.
+- Added the dependencies `gymnasium`, `stable-baselines3`, `tensorboard`.
+
+### 2026-09-28 — Environment v1
+- Implemented `__init__`, `reset`, `step`, `_get_obs`, `_compute_reward`.
+
