@@ -8,6 +8,8 @@ satSim simulates this system realistically and shows what happens in 3D. It also
 - a **classical controller** (PD), designed by hand;
 - a **PPO agent**, a neural network trained by trial and error that learns by itself how to drive the wheels.
 
+![PPO agent (left) vs PD controller (right), same initial condition](docs/images/compare.png)
+
 ## What you can do
 
 - **Watch the satellite in 3D** as it rotates, with the reference frames, the wheel axes, the Sun and the Earth.
