@@ -1,6 +1,6 @@
 # satSim
 
-**3D simulator of the attitude control of a CubeSat, with a Reinforcement Learning agent that learns to point it.**
+**3D simulator of the attitude control of a CubeSat (built with claude), with a Reinforcement Learning agent that learns to point it.**
 
 A 3U CubeSat in space has to rotate and point precisely in a given direction. It does so with four reaction wheels: when a flywheel is spun up or slowed down, the satellite rotates the opposite way.
 
