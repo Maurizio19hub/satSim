@@ -28,7 +28,7 @@ Average over 10 test manoeuvres, starting 40–80° away from the target directi
 | Time to get within 1° | **10.4 s** | 12.2 s |
 | Energy used | 65.8 J | **61.3 J** |
 
-The agent is about 8 times more precise and faster than the classical controller, with slightly higher consumption. The path that led to this result is told in the [RL development log](rl/README.md#9-rl-development-log).
+The agent is about 8 times more precise and faster than the classical controller, with slightly higher consumption. The path that led to this result is told in the [RL development log](rl/README.md#rl-development-log).
 
 ## Quick start
 
@@ -74,7 +74,7 @@ python -m rl.evaluate models/local_training_v4_seed1@3_best
 
 - During training the model is checked every 100 000 steps on separate validation manoeuvres, and the best one is saved as `<out>_best.zip`.
 - Learning curves: `tensorboard --logdir runs/ppo_adcs`.
-- Results can differ a little from run to run (different hardware, parallel environments): training is sensitive to the seed, see the [RL development log](rl/README.md#9-rl-development-log).
+- Results can differ a little from run to run (different hardware, parallel environments): training is sensitive to the seed, see the [RL development log](rl/README.md#rl-development-log).
 
 ## How it is built
 
